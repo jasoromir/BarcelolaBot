@@ -1,8 +1,9 @@
 import type { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const COOKIE_NAME = 'wabot_admin';
+const MAX_COOKIE_AGE_MS = 7 * 24 * 3600 * 1000;
 
 export interface AuthOpts {
   passwordHash: string;
@@ -22,7 +23,14 @@ function verify(signed: string, secret: string): string | null {
     const value = decoded.slice(0, sepIdx);
     const sig = decoded.slice(sepIdx + 1);
     const expected = createHmac('sha256', secret).update(value).digest('hex');
-    if (expected !== sig) return null;
+    const a = Buffer.from(expected, 'hex');
+    const b = Buffer.from(sig, 'hex');
+    if (a.length !== b.length) return null;
+    if (!timingSafeEqual(a, b)) return null;
+    const parts = value.split(':');
+    if (parts.length !== 2 || parts[0] !== 'admin') return null;
+    const ts = Number(parts[1]);
+    if (!Number.isFinite(ts) || Date.now() - ts > MAX_COOKIE_AGE_MS) return null;
     return value;
   } catch {
     return null;

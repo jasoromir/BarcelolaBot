@@ -12,20 +12,14 @@ export interface AdminConfig {
   webDir: string;
 }
 
-export function registerAdminRoutes(exp: Express, app: App, cfg?: AdminConfig): void {
-  const effective: AdminConfig =
-    cfg ?? {
-      passwordHash: process.env.ADMIN_PASSWORD_HASH ?? '',
-      cookieSecret: process.env.SESSION_COOKIE_SECRET ?? 'dev-insecure',
-      webDir: path.resolve(process.cwd(), 'web'),
-    };
-  const auth = createAuth(effective);
+export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): void {
+  const auth = createAuth(cfg);
 
   exp.get('/admin', (_req: Request, res: Response) => {
-    res.sendFile(path.join(effective.webDir, 'admin.html'));
+    res.sendFile(path.join(cfg.webDir, 'admin.html'));
   });
-  exp.get('/admin/admin.js', (_req, res) => res.sendFile(path.join(effective.webDir, 'admin.js')));
-  exp.get('/admin/admin.css', (_req, res) => res.sendFile(path.join(effective.webDir, 'admin.css')));
+  exp.get('/admin/admin.js', (_req, res) => res.sendFile(path.join(cfg.webDir, 'admin.js')));
+  exp.get('/admin/admin.css', (_req, res) => res.sendFile(path.join(cfg.webDir, 'admin.css')));
 
   exp.post('/admin/login', async (req, res) => {
     const password = (req.body?.password as string) ?? '';
@@ -128,9 +122,8 @@ export function registerAdminRoutes(exp: Express, app: App, cfg?: AdminConfig): 
         ? [app.config.settings.broadcast.test_group_id]
         : app.config.groups.groups.filter((g) => g.active).map((g) => g.id);
     const svc = new GroupAdminService(app.whatsapp);
-    if (action === 'close') await svc.closeAll(targets);
-    else await svc.openAll(targets);
-    res.json({ ok: true, targets });
+    const result = action === 'close' ? await svc.closeAll(targets) : await svc.openAll(targets);
+    res.json(result);
   }
   exp.post('/admin/api/groups/close-all', async (_req, res) => bulkGroupAction('close', res));
   exp.post('/admin/api/groups/open-all', async (_req, res) => bulkGroupAction('open', res));

@@ -4,10 +4,8 @@ import { handleBookingWebhook } from '../webhook/bookingHandler.js';
 
 export function registerWebhookRoutes(exp: Express, app: App): void {
   exp.post('/webhook/wix', async (req, res) => {
-    // Respond 200 quickly; process asynchronously. Dedup ensures Wix retries are safe.
-    res.status(200).json({ received: true });
     try {
-      await handleBookingWebhook({
+      const outcome = await handleBookingWebhook({
         payload: req.body,
         config: app.config,
         dedup: app.webhookDedup,
@@ -15,12 +13,16 @@ export function registerWebhookRoutes(exp: Express, app: App): void {
         logger: app.logger,
         isPaused: () => app.controlState.isPaused(),
       });
+      // Always 200 so Wix retries stop; we've either sent, skipped, or deferred-to-queue.
+      res.status(200).json({ received: true, outcome: outcome.outcome });
     } catch (err) {
       app.logger.error({
         source: 'http',
         eventType: 'webhook_handler_crash',
         message: (err as Error).message,
       });
+      // 500 so Wix retries
+      res.status(500).json({ received: false });
     }
   });
 }

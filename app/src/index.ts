@@ -17,13 +17,27 @@ import { createHttpServer } from './http/server.js';
 import { startScheduler } from './scheduler.js';
 import type { App } from './app.js';
 
+function requireEnv(name: string, fallback?: string): string {
+  const v = process.env[name];
+  if (v && v.length > 0) return v;
+  if (fallback !== undefined) return fallback;
+  console.error(`FATAL: missing required environment variable ${name}. See .env.example.`);
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
+  const adminPasswordHash = requireEnv('ADMIN_PASSWORD_HASH');
+  const sessionCookieSecret = requireEnv('SESSION_COOKIE_SECRET');
+  const wixApiKey = requireEnv('WIX_API_KEY');
+  const wixSiteId = requireEnv('WIX_SITE_ID');
+
   const dataDir = path.resolve(process.env.DATA_DIR ?? './data');
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   const sessionDir = path.join(dataDir, 'session');
   const logDir = path.join(dataDir, 'logs');
   const dbPath = path.join(dataDir, 'wabot.sqlite');
   const configDir = path.resolve(process.cwd(), 'config');
+  const webDir = path.resolve(process.cwd(), 'web');
 
   const db = openDatabase(dbPath);
   const eventLog = new EventLog(db);
@@ -49,18 +63,18 @@ async function main(): Promise<void> {
 
   const whatsapp = createWhatsAppClient({ sessionDir });
   const wix = createWixClient({
-    apiKey: process.env.WIX_API_KEY ?? '',
-    siteId: process.env.WIX_SITE_ID ?? '',
+    apiKey: wixApiKey,
+    siteId: wixSiteId,
   });
 
   const dmSender = new DirectMessageSender({
     client: whatsapp,
     pendingDms,
     allowlist: () => config.allowlist,
-    retry: {
+    retry: () => ({
       attempts: config.settings.retry.max_attempts,
       backoffMs: config.settings.retry.backoff_ms,
-    },
+    }),
     isPaused: () => controlState.isPaused(),
   });
 
@@ -105,7 +119,13 @@ async function main(): Promise<void> {
     }
   });
 
-  const server = createHttpServer(app);
+  const server = createHttpServer(app, {
+    adminConfig: {
+      passwordHash: adminPasswordHash,
+      cookieSecret: sessionCookieSecret,
+      webDir,
+    },
+  });
   const port = Number(process.env.HTTP_PORT ?? 3000);
   server.listen(port, () => {
     logger.info({

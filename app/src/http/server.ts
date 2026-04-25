@@ -1,10 +1,14 @@
 import express, { Express } from 'express';
 import cookieParser from 'cookie-parser';
 import type { App } from '../app.js';
-import { registerAdminRoutes } from './adminRoutes.js';
+import { registerAdminRoutes, type AdminConfig } from './adminRoutes.js';
 import { registerWebhookRoutes } from './webhookRoutes.js';
 
-export function createHttpServer(app: App): Express {
+export interface HttpServerDeps {
+  adminConfig: AdminConfig;
+}
+
+export function createHttpServer(app: App, deps: HttpServerDeps): Express {
   const exp = express();
   exp.use(express.json({ limit: '1mb' }));
   exp.use(cookieParser());
@@ -19,6 +23,6 @@ export function createHttpServer(app: App): Express {
   });
 
   registerWebhookRoutes(exp, app);
-  registerAdminRoutes(exp, app);
+  registerAdminRoutes(exp, app, deps.adminConfig);
   return exp;
 }

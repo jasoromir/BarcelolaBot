@@ -15,7 +15,8 @@ export interface DirectMessageSenderOpts {
   client: WhatsAppClient;
   pendingDms: PendingDms;
   allowlist: () => AllowlistConfig;
-  retry: RetryOpts;
+  retry: RetryOpts | (() => RetryOpts);
+  maxDrainAttempts?: number;
   isPaused?: () => boolean;
 }
 
@@ -27,6 +28,10 @@ export interface SendInput {
 
 export class DirectMessageSender {
   constructor(private readonly opts: DirectMessageSenderOpts) {}
+
+  private retryOpts(): RetryOpts {
+    return typeof this.opts.retry === 'function' ? this.opts.retry() : this.opts.retry;
+  }
 
   async send(input: SendInput): Promise<DmOutcome> {
     if (this.opts.isPaused?.()) {
@@ -47,7 +52,7 @@ export class DirectMessageSender {
     try {
       const r = await retry(
         () => this.opts.client.sendDirect(input.phone, input.body),
-        this.opts.retry,
+        this.retryOpts(),
       );
       return { outcome: 'sent', messageId: r.messageId };
     } catch (err) {
@@ -62,13 +67,14 @@ export class DirectMessageSender {
       try {
         await retry(
           () => this.opts.client.sendDirect(item.phone, item.body),
-          this.opts.retry,
+          this.retryOpts(),
         );
         this.opts.pendingDms.markSent(item.id);
         stats.sent += 1;
       } catch (err) {
         this.opts.pendingDms.recordFailure(item.id, (err as Error).message);
-        if (item.attempts + 1 >= this.opts.retry.attempts * 3) {
+        const limit = this.opts.maxDrainAttempts ?? 5;
+        if (item.attempts + 1 >= limit) {
           this.opts.pendingDms.markAbandoned(item.id);
           stats.abandoned += 1;
         } else {

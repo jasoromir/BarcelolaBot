@@ -5,13 +5,13 @@ const BookingWebhookSchema = z.object({
   entityId: z.string(),
   data: z.object({
     booking: z.object({
-      id: z.string(),
-      serviceId: z.string(),
-      startDate: z.string(),
+      id: z.string().min(1),
+      serviceId: z.string().min(1),
+      startDate: z.string().min(1),
       contactDetails: z.object({
         firstName: z.string().optional(),
         lastName: z.string().optional(),
-        phone: z.string(),
+        phone: z.string().min(1),
       }),
     }),
   }),

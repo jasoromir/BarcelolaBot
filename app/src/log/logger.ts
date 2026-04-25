@@ -46,7 +46,7 @@ export function createLogger(opts: CreateLoggerOpts): AppLogger {
 
   const emit = (level: LogLevel, c: LogCall) => {
     winstonLogger.log({
-      level: level === 'warn' ? 'warn' : level,
+      level,
       message: c.message,
       source: c.source,
       eventType: c.eventType,

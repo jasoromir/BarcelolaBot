@@ -37,4 +37,15 @@ describe('GroupAdminService.closeAll', () => {
     expect(fn).toHaveBeenNthCalledWith(1, 'g1@g.us', true);
     expect(fn).toHaveBeenNthCalledWith(2, 'g2@g.us', true);
   });
+
+  it('continues on per-group failure and reports ok/failed', async () => {
+    const fn = vi.fn(async (id: string) => {
+      if (id === 'g1@g.us') throw new Error('boom');
+    });
+    const c = fakeClient({ setGroupMessagesAdminsOnly: fn });
+    const result = await new GroupAdminService(c).closeAll(['g1@g.us', 'g2@g.us']);
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(result.ok).toEqual(['g2@g.us']);
+    expect(result.failed).toEqual([{ groupId: 'g1@g.us', error: 'boom' }]);
+  });
 });

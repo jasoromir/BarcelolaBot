@@ -8,6 +8,7 @@ const { Client, LocalAuth } = pkg;
 export interface WhatsAppClientOpts {
   sessionDir: string;
   onQr?: (dataUrl: string) => void;
+  onQrRaw?: (qrString: string) => void;
 }
 
 type Listener = (s: WhatsAppState) => void;
@@ -29,6 +30,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   });
 
   client.on('qr', async (qr: string) => {
+    opts.onQrRaw?.(qr);
     const dataUrl = await QRCode.toDataURL(qr);
     opts.onQr?.(dataUrl);
     setState({ kind: 'qr_pending', qrDataUrl: dataUrl });

@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
+import qrcodeTerminal from 'qrcode-terminal';
 import { loadConfig } from './config/loader.js';
 import { openDatabase } from './persistence/db.js';
 import { EventLog } from './persistence/eventLog.js';
@@ -61,7 +62,20 @@ async function main(): Promise<void> {
 
   let config = loadConfig(configDir);
 
-  const whatsapp = createWhatsAppClient({ sessionDir });
+  const whatsapp = createWhatsAppClient({
+    sessionDir,
+    onQrRaw: (qr) => {
+      console.log('\n============ SCAN THIS QR WITH WHATSAPP ============\n');
+      qrcodeTerminal.generate(qr, { small: true });
+      console.log('\nWhatsApp → Settings → Linked Devices → Link a device');
+      console.log('=====================================================\n');
+      logger.info({
+        source: 'whatsapp',
+        eventType: 'qr_received',
+        message: 'QR code printed to terminal; scan to link this device',
+      });
+    },
+  });
   const wix = createWixClient({
     apiKey: wixApiKey,
     siteId: wixSiteId,
@@ -136,20 +150,20 @@ async function main(): Promise<void> {
     });
   });
 
-  if (controlStateStore.get('last_connect_state') === 'connected') {
-    logger.info({
+  // Auto-start WhatsApp on boot. If a session exists at sessionDir it reconnects silently;
+  // otherwise whatsapp-web.js emits a 'qr' event and we print it to the terminal.
+  logger.info({
+    source: 'startup',
+    eventType: 'autoconnect',
+    message: 'starting WhatsApp client (will print QR if no session)',
+  });
+  whatsapp.start().catch((err) => {
+    logger.error({
       source: 'startup',
-      eventType: 'autoconnect',
-      message: 'attempting WhatsApp reconnect (last state was connected)',
+      eventType: 'autoconnect_failed',
+      message: (err as Error).message,
     });
-    whatsapp.start().catch((err) => {
-      logger.error({
-        source: 'startup',
-        eventType: 'autoconnect_failed',
-        message: (err as Error).message,
-      });
-    });
-  }
+  });
 
   startScheduler(app);
 }

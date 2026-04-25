@@ -2,6 +2,9 @@
 node_modules/
 yarn.lock
 
+# Local-only npm registry override (AWS CodeArtifact workaround)
+app/.npmrc
+
 # Environment variables
 .env
 .env.local

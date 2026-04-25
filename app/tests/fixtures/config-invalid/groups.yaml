@@ -1,0 +1,4 @@
+groups:
+  - id: "not-a-group-id"
+    name: "Bad"
+    active: true

@@ -1,0 +1,6 @@
+tours:
+  gaudi-modernista:
+    name_he: "tour"
+    emoji: "🌻"
+    description_he: "desc"
+    meeting_point_he: "mp"

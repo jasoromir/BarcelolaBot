@@ -1,0 +1,5 @@
+mode: "explicit"
+explicit_phones:
+  - "+972501234567"
+rule:
+  country_codes: []

@@ -1,0 +1,5 @@
+night_header: "night {date}"
+morning_header: "morning {date}"
+footer: "footer"
+tour_block: "{emoji} {time_range} {name_he} {description_he} {meeting_point_he}"
+booking_confirmation: "hi {client_name}"

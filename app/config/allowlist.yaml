@@ -1,0 +1,4 @@
+mode: "explicit"
+explicit_phones: []
+rule:
+  country_codes: []

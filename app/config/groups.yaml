@@ -1,0 +1,6 @@
+# Broadcast groups. Bot must be admin of each.
+# User will replace with real group IDs during initial setup.
+groups:
+  - id: "120363099999999999@g.us"
+    name: "Test Group (placeholder)"
+    active: false

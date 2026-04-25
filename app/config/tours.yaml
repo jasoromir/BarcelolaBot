@@ -1,0 +1,18 @@
+# Tour ID -> Hebrew description block.
+# Tour IDs must match what Wix returns for that tour.
+tours:
+  gaudi-modernista:
+    name_he: "המסע בעקבות גאודי והמודרניסטה"
+    emoji: "🌻"
+    description_he: |
+      בסיור נלמד ונכיר את הקטלאני המפורסם מכולם, ה"משוגאון" של ברצלונה,
+      האדריכל המוכשר - אנטוני גאודי ונראה מבנים יפיפים שלו בשדרת פסאג' דה גרסייה.
+      את הסיור נסיים במפעל חייו של גאודי - הסגרדה פאמיליה.
+    meeting_point_he: "10:15 בכניסה למסעדת הארד רוק קפה, פלאסה קטלוניה."
+  born-to-be-wild:
+    name_he: "כשאומנות וקולינריה נפגשים Born to be wild"
+    emoji: "🌻"
+    description_he: |
+      סיור לשכונת בורן - טיול בשכונה הכי שיקית בעיר, בסמטאות היפות נראה גלריות,
+      חנויות מעצבים, אמנים מקומיים ונטעם טאפסים ומטעמים מקומיים.
+    meeting_point_he: "15:50 בכניסה למטרו Jaume I צמוד למלון Suizo"

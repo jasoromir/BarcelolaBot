@@ -1,0 +1,28 @@
+night_header: |
+  *לילה טוב לכל המטיילים והמטיילות האהובים מ- Barcelola Tours ✨🌜*
+
+  ❤️ *לנמצאים בברצלונה - הצטרפו לסיורי ברצלולה, מחר {weekday_he} ה-{date}* ❤️
+
+  *סיורים חינם על בסיס טיפ בתוך העיר*
+
+morning_header: |
+  *בוקר טוב לכל המטיילים והמטיילות ☀️*
+  *היום {weekday_he} ה-{date} — הסיורים שיתקיימו:*
+
+footer: |
+  🌻 *למידע נוסף והרשמה לסיורים הכנסו לאתר שלנו:*
+  https://www.barcelola-tours.com/barcelolatours
+
+  🌻בואו גם ל *קבוצת הפייסבוק* שלנו!
+  https://www.facebook.com/groups/barcelolatours/?ref=share
+
+tour_block: |
+  {emoji} {time_range}
+  *{name_he}*
+  {description_he}
+  *נקודת ושעת מפגש* - {meeting_point_he}
+
+booking_confirmation: |
+  שלום {client_name}! 👋
+  אישור הזמנתך לסיור *{tour_name_he}* בתאריך {date} בשעה {time}.
+  נתראה! 🌻

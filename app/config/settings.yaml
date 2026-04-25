@@ -1,0 +1,12 @@
+timezone: "Europe/Madrid"
+schedule:
+  nightly_cron: "30 21 * * *"
+  morning_cron: "30 8 * * *"
+broadcast:
+  mode: "test"
+  test_group_id: "120363099999999999@g.us"
+  inter_message_delay_ms: 2000
+min_bookings_to_run: 1
+retry:
+  max_attempts: 3
+  backoff_ms: [60000, 300000, 900000]

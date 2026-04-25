@@ -1,0 +1,16 @@
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #f4f4f4; color: #222; }
+main { max-width: 900px; margin: 0 auto; padding: 1rem; }
+.card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+.card h2 { margin-top: 0; font-size: 1.1rem; }
+header { display: flex; justify-content: space-between; align-items: center; }
+.hidden { display: none; }
+.button-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+button { padding: 0.5rem 1rem; cursor: pointer; border: 1px solid #bbb; background: #fafafa; border-radius: 4px; }
+button:hover { background: #eee; }
+.error { color: #b00; }
+.log-tail { max-height: 300px; overflow-y: auto; background: #111; color: #0f0; padding: 0.5rem; font-size: 0.75rem; border-radius: 4px; white-space: pre-wrap; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid #eee; }
+img#qr-img { max-width: 280px; }
+form input { padding: 0.5rem; margin-right: 0.5rem; }

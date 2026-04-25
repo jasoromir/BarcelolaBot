@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>WhatsApp Bot — Admin</title>
+  <link rel="stylesheet" href="/admin/admin.css"/>
+</head>
+<body>
+  <main id="app">
+    <section id="login-panel" class="card hidden">
+      <h1>Admin Login</h1>
+      <form id="login-form">
+        <input type="password" name="password" placeholder="Password" required autofocus/>
+        <button type="submit">Login</button>
+      </form>
+      <p id="login-error" class="error"></p>
+    </section>
+
+    <section id="main-panel" class="hidden">
+      <header>
+        <h1>WhatsApp Bot — Admin</h1>
+        <button id="logout">Logout</button>
+      </header>
+
+      <div class="card" id="status-card">
+        <h2>Status</h2>
+        <div id="status-content">Loading…</div>
+        <div class="button-row">
+          <button id="btn-pause">Pause automations</button>
+          <button id="btn-resume">Resume automations</button>
+          <button id="btn-connect">Connect WA</button>
+          <button id="btn-disconnect">Disconnect WA</button>
+        </div>
+      </div>
+
+      <div class="card hidden" id="qr-card">
+        <h2>Scan to connect</h2>
+        <img id="qr-img" alt="QR code"/>
+      </div>
+
+      <div class="card">
+        <h2>Jobs</h2>
+        <div class="button-row">
+          <button data-job="nightly" data-dry="1">Run Nightly (dry-run)</button>
+          <button data-job="nightly" data-dry="0">Run Nightly (LIVE)</button>
+          <button data-job="morning" data-dry="1">Run Morning (dry-run)</button>
+          <button data-job="morning" data-dry="0">Run Morning (LIVE)</button>
+          <button id="btn-close-all">Close all groups</button>
+          <button id="btn-open-all">Re-open all groups</button>
+        </div>
+        <pre id="job-output" class="log-tail"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Recent job runs</h2>
+        <table id="job-runs"><thead><tr>
+          <th>Job</th><th>Started</th><th>Status</th><th>Tours</th><th>Sent</th><th>Closed</th><th>Error</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+
+      <div class="card">
+        <h2>Recent events</h2>
+        <pre id="event-log" class="log-tail"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Config</h2>
+        <div id="config-summary"></div>
+        <button id="btn-reload-config">Reload config</button>
+      </div>
+    </section>
+  </main>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

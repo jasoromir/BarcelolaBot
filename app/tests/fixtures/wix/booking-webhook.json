@@ -1,0 +1,17 @@
+{
+  "id": "evt_001",
+  "entityId": "booking_42",
+  "eventType": "wix.bookings.v1.booking_confirmed",
+  "data": {
+    "booking": {
+      "id": "booking_42",
+      "serviceId": "gaudi-modernista",
+      "startDate": "2026-04-26T08:30:00.000Z",
+      "contactDetails": {
+        "firstName": "Dana",
+        "lastName": "Levi",
+        "phone": "+972501234567"
+      }
+    }
+  }
+}

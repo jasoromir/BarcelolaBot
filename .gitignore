@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+yarn.lock
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Data directory (contains database and WhatsApp session)
+data/
+app/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+*.log
+
+# WhatsApp session files
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Build outputs
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+
+# Temporary files
+tmp/
+temp/
+.claude/
+
+# Legacy project trees kept locally for reference only — do not publish
+backend/
+frontend/
+PHASE2/
+PHASE3/
+PHASE4/
+PHASE_DEPLOY/
+database_kiro.js
+deploy-aws.sh
+setup.sh
+QUICKSTART.md
+TESTING.md

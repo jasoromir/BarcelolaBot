@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { openDatabase } from '../../src/persistence/db';
-import { EventLog } from '../../src/persistence/eventLog';
-import { createLogger } from '../../src/log/logger';
+import { openDatabase } from '../../src/persistence/db.js';
+import { EventLog } from '../../src/persistence/eventLog.js';
+import { createLogger } from '../../src/log/logger.js';
 
 describe('createLogger', () => {
   it('writes events to the SQLite sink', () => {

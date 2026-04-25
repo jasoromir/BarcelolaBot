@@ -1,7 +1,7 @@
 import pkg from 'whatsapp-web.js';
 import QRCode from 'qrcode';
-import type { WhatsAppState } from '../types';
-import type { SendResult, WhatsAppClient } from './types';
+import type { WhatsAppState } from '../types.js';
+import type { SendResult, WhatsAppClient } from './types.js';
 
 const { Client, LocalAuth } = pkg;
 

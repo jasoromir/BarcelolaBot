@@ -12,7 +12,7 @@ import {
   TemplatesConfigSchema,
   ToursConfig,
   ToursConfigSchema,
-} from './schemas';
+} from './schemas.js';
 import { z } from 'zod';
 
 export interface AppConfig {

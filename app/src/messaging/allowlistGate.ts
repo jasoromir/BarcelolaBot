@@ -1,4 +1,4 @@
-import type { AllowlistConfig } from '../config/schemas';
+import type { AllowlistConfig } from '../config/schemas.js';
 
 export function allowlistAllows(cfg: AllowlistConfig, phoneE164: string): boolean {
   switch (cfg.mode) {

@@ -1,5 +1,5 @@
 import type { Database as DB } from 'better-sqlite3';
-import type { JobName, JobStatus } from '../types';
+import type { JobName, JobStatus } from '../types.js';
 
 export interface JobRunRow {
   id: number;

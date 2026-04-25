@@ -1,4 +1,4 @@
-import type { WhatsAppState } from '../types';
+import type { WhatsAppState } from '../types.js';
 
 export interface SendResult {
   messageId: string;

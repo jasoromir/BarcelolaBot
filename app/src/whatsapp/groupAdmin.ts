@@ -1,4 +1,4 @@
-import type { WhatsAppClient } from './types';
+import type { WhatsAppClient } from './types.js';
 
 export interface VerifyResult {
   admin: string[];

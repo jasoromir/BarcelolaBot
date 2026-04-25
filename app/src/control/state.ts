@@ -1,4 +1,4 @@
-import type { ControlState } from '../persistence/controlState';
+import type { ControlState } from '../persistence/controlState.js';
 
 const KEY_PAUSED = 'automations_paused';
 

@@ -1,8 +1,8 @@
 import express, { Express } from 'express';
 import cookieParser from 'cookie-parser';
-import type { App } from '../app';
-import { registerAdminRoutes } from './adminRoutes';
-import { registerWebhookRoutes } from './webhookRoutes';
+import type { App } from '../app.js';
+import { registerAdminRoutes } from './adminRoutes.js';
+import { registerWebhookRoutes } from './webhookRoutes.js';
 
 export function createHttpServer(app: App): Express {
   const exp = express();

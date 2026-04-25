@@ -5,7 +5,7 @@ import {
   TemplatesConfigSchema,
   AllowlistConfigSchema,
   SettingsConfigSchema,
-} from '../../src/config/schemas';
+} from '../../src/config/schemas.js';
 
 describe('GroupsConfigSchema', () => {
   it('accepts valid groups', () => {

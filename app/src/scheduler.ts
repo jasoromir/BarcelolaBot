@@ -1,7 +1,7 @@
 import cron from 'node-cron';
-import type { App } from './app';
-import { runNightlyJob } from './jobs/nightlyJob';
-import { runMorningJob } from './jobs/morningJob';
+import type { App } from './app.js';
+import { runNightlyJob } from './jobs/nightlyJob.js';
+import { runMorningJob } from './jobs/morningJob.js';
 
 export interface ScheduledTasks {
   nightly: cron.ScheduledTask;

@@ -1,21 +1,21 @@
 import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
-import { loadConfig } from './config/loader';
-import { openDatabase } from './persistence/db';
-import { EventLog } from './persistence/eventLog';
-import { JobHistory } from './persistence/jobHistory';
-import { WebhookDedup } from './persistence/webhookDedup';
-import { PendingDms } from './persistence/pendingDms';
-import { ControlState } from './persistence/controlState';
-import { ControlStateService } from './control/state';
-import { createLogger } from './log/logger';
-import { createWhatsAppClient } from './whatsapp/client';
-import { createWixClient } from './wix/client';
-import { DirectMessageSender } from './messaging/directMessage';
-import { createHttpServer } from './http/server';
-import { startScheduler } from './scheduler';
-import type { App } from './app';
+import { loadConfig } from './config/loader.js';
+import { openDatabase } from './persistence/db.js';
+import { EventLog } from './persistence/eventLog.js';
+import { JobHistory } from './persistence/jobHistory.js';
+import { WebhookDedup } from './persistence/webhookDedup.js';
+import { PendingDms } from './persistence/pendingDms.js';
+import { ControlState } from './persistence/controlState.js';
+import { ControlStateService } from './control/state.js';
+import { createLogger } from './log/logger.js';
+import { createWhatsAppClient } from './whatsapp/client.js';
+import { createWixClient } from './wix/client.js';
+import { DirectMessageSender } from './messaging/directMessage.js';
+import { createHttpServer } from './http/server.js';
+import { startScheduler } from './scheduler.js';
+import type { App } from './app.js';
 
 async function main(): Promise<void> {
   const dataDir = path.resolve(process.env.DATA_DIR ?? './data');

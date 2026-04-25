@@ -1,6 +1,6 @@
 import type { Express } from 'express';
-import type { App } from '../app';
-import { handleBookingWebhook } from '../webhook/bookingHandler';
+import type { App } from '../app.js';
+import { handleBookingWebhook } from '../webhook/bookingHandler.js';
 
 export function registerWebhookRoutes(exp: Express, app: App): void {
   exp.post('/webhook/wix', async (req, res) => {

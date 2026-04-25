@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { BookingEvent } from '../types';
+import type { BookingEvent } from '../types.js';
 
 const BookingWebhookSchema = z.object({
   entityId: z.string(),

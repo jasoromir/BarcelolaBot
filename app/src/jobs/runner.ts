@@ -1,6 +1,6 @@
-import type { JobHistory } from '../persistence/jobHistory';
-import type { AppLogger } from '../log/logger';
-import type { JobName, JobOutcome } from '../types';
+import type { JobHistory } from '../persistence/jobHistory.js';
+import type { AppLogger } from '../log/logger.js';
+import type { JobName, JobOutcome } from '../types.js';
 
 export interface RunOpts {
   jobName: JobName;

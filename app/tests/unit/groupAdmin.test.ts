@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { GroupAdminService } from '../../src/whatsapp/groupAdmin';
-import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types';
+import { GroupAdminService } from '../../src/whatsapp/groupAdmin.js';
+import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types.js';
 
 function fakeClient(overrides?: Partial<WhatsAppClient>): WhatsAppClient {
   return {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Broadcaster, type BroadcastResult } from '../../src/messaging/broadcaster';
-import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types';
+import { Broadcaster, type BroadcastResult } from '../../src/messaging/broadcaster.js';
+import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types.js';
 
 function fakeClient(partial: Partial<WhatsAppClient> = {}): WhatsAppClient {
   return {

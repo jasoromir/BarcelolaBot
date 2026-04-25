@@ -1,14 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { openDatabase } from '../../src/persistence/db';
-import { EventLog } from '../../src/persistence/eventLog';
-import { JobHistory } from '../../src/persistence/jobHistory';
-import { createLogger } from '../../src/log/logger';
-import { runNightlyJob } from '../../src/jobs/nightlyJob';
-import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types';
-import type { WixClient } from '../../src/wix/types';
-import type { AppConfig } from '../../src/config/loader';
+import { openDatabase } from '../../src/persistence/db.js';
+import { EventLog } from '../../src/persistence/eventLog.js';
+import { JobHistory } from '../../src/persistence/jobHistory.js';
+import { createLogger } from '../../src/log/logger.js';
+import { runNightlyJob } from '../../src/jobs/nightlyJob.js';
+import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types.js';
+import type { WixClient } from '../../src/wix/types.js';
+import type { AppConfig } from '../../src/config/loader.js';
 
 function fakeClient(partial: Partial<WhatsAppClient> = {}): WhatsAppClient {
   return {

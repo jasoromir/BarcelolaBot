@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   buildBroadcastMessage,
   buildBookingConfirmation,
-} from '../../src/messaging/builder';
-import type { ToursConfig, TemplatesConfig } from '../../src/config/schemas';
+} from '../../src/messaging/builder.js';
+import type { ToursConfig, TemplatesConfig } from '../../src/config/schemas.js';
 
 const tours: ToursConfig = {
   tours: {

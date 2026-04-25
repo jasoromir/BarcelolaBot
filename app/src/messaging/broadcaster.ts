@@ -1,5 +1,5 @@
-import type { WhatsAppClient } from '../whatsapp/types';
-import { retry, type RetryOpts } from './retry';
+import type { WhatsAppClient } from '../whatsapp/types.js';
+import { retry, type RetryOpts } from './retry.js';
 
 export interface BroadcastResult {
   sent: number;

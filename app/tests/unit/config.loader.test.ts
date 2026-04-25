@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from '../../src/config/loader';
+import { loadConfig } from '../../src/config/loader.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

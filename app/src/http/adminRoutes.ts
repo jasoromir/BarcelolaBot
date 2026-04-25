@@ -1,10 +1,10 @@
 import type { Express, Request, Response } from 'express';
 import path from 'node:path';
-import type { App } from '../app';
-import { createAuth } from './auth';
-import { runNightlyJob } from '../jobs/nightlyJob';
-import { runMorningJob } from '../jobs/morningJob';
-import { GroupAdminService } from '../whatsapp/groupAdmin';
+import type { App } from '../app.js';
+import { createAuth } from './auth.js';
+import { runNightlyJob } from '../jobs/nightlyJob.js';
+import { runMorningJob } from '../jobs/morningJob.js';
+import { GroupAdminService } from '../whatsapp/groupAdmin.js';
 
 export interface AdminConfig {
   passwordHash: string;

@@ -1,5 +1,5 @@
-import type { Tour } from '../types';
-import type { WixClient } from './types';
+import type { Tour } from '../types.js';
+import type { WixClient } from './types.js';
 
 export interface WixClientOpts {
   apiKey: string;

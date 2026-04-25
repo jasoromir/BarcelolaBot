@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePhone } from '../../src/messaging/phoneNormalizer';
+import { normalizePhone } from '../../src/messaging/phoneNormalizer.js';
 
 describe('normalizePhone', () => {
   it('passes through valid +CC format', () => {

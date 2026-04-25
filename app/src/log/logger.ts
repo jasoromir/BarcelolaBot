@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
-import type { EventLog, LogLevel } from '../persistence/eventLog';
+import type { EventLog, LogLevel } from '../persistence/eventLog.js';
 
 export interface LogCall {
   source: string;

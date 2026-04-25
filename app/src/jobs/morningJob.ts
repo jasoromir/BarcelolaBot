@@ -1,13 +1,13 @@
-import type { WhatsAppClient } from '../whatsapp/types';
-import type { WixClient } from '../wix/types';
-import type { JobHistory } from '../persistence/jobHistory';
-import type { AppLogger } from '../log/logger';
-import type { AppConfig } from '../config/loader';
-import type { JobOutcome } from '../types';
-import { GroupAdminService } from '../whatsapp/groupAdmin';
-import { Broadcaster } from '../messaging/broadcaster';
-import { buildBroadcastMessage } from '../messaging/builder';
-import { runJob } from './runner';
+import type { WhatsAppClient } from '../whatsapp/types.js';
+import type { WixClient } from '../wix/types.js';
+import type { JobHistory } from '../persistence/jobHistory.js';
+import type { AppLogger } from '../log/logger.js';
+import type { AppConfig } from '../config/loader.js';
+import type { JobOutcome } from '../types.js';
+import { GroupAdminService } from '../whatsapp/groupAdmin.js';
+import { Broadcaster } from '../messaging/broadcaster.js';
+import { buildBroadcastMessage } from '../messaging/builder.js';
+import { runJob } from './runner.js';
 
 export interface MorningJobInput {
   config: AppConfig;

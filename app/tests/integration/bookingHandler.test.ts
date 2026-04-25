@@ -3,15 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { openDatabase } from '../../src/persistence/db';
-import { WebhookDedup } from '../../src/persistence/webhookDedup';
-import { PendingDms } from '../../src/persistence/pendingDms';
-import { EventLog } from '../../src/persistence/eventLog';
-import { createLogger } from '../../src/log/logger';
-import { DirectMessageSender } from '../../src/messaging/directMessage';
-import { handleBookingWebhook } from '../../src/webhook/bookingHandler';
-import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types';
-import type { AppConfig } from '../../src/config/loader';
+import { openDatabase } from '../../src/persistence/db.js';
+import { WebhookDedup } from '../../src/persistence/webhookDedup.js';
+import { PendingDms } from '../../src/persistence/pendingDms.js';
+import { EventLog } from '../../src/persistence/eventLog.js';
+import { createLogger } from '../../src/log/logger.js';
+import { DirectMessageSender } from '../../src/messaging/directMessage.js';
+import { handleBookingWebhook } from '../../src/webhook/bookingHandler.js';
+import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types.js';
+import type { AppConfig } from '../../src/config/loader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(

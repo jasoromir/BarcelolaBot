@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { openDatabase } from '../../src/persistence/db';
-import { PendingDms } from '../../src/persistence/pendingDms';
-import { DirectMessageSender } from '../../src/messaging/directMessage';
-import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types';
-import type { AllowlistConfig } from '../../src/config/schemas';
+import { openDatabase } from '../../src/persistence/db.js';
+import { PendingDms } from '../../src/persistence/pendingDms.js';
+import { DirectMessageSender } from '../../src/messaging/directMessage.js';
+import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types.js';
+import type { AllowlistConfig } from '../../src/config/schemas.js';
 
 function fakeClient(partial: Partial<WhatsAppClient> = {}): WhatsAppClient {
   return {

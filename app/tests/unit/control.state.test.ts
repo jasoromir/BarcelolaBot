@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { openDatabase } from '../../src/persistence/db';
-import { ControlState } from '../../src/persistence/controlState';
-import { ControlStateService } from '../../src/control/state';
+import { openDatabase } from '../../src/persistence/db.js';
+import { ControlState } from '../../src/persistence/controlState.js';
+import { ControlStateService } from '../../src/control/state.js';
 
 function svc() {
   const db = openDatabase(

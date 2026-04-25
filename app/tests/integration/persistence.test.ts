@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { openDatabase } from '../../src/persistence/db';
-import { EventLog } from '../../src/persistence/eventLog';
-import { JobHistory } from '../../src/persistence/jobHistory';
-import { WebhookDedup } from '../../src/persistence/webhookDedup';
-import { PendingDms } from '../../src/persistence/pendingDms';
-import { ControlState } from '../../src/persistence/controlState';
+import { openDatabase } from '../../src/persistence/db.js';
+import { EventLog } from '../../src/persistence/eventLog.js';
+import { JobHistory } from '../../src/persistence/jobHistory.js';
+import { WebhookDedup } from '../../src/persistence/webhookDedup.js';
+import { PendingDms } from '../../src/persistence/pendingDms.js';
+import { ControlState } from '../../src/persistence/controlState.js';
 
 function freshDb() {
   return openDatabase(

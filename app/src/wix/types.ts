@@ -1,4 +1,4 @@
-import type { Tour, BookingEvent } from '../types';
+import type { Tour, BookingEvent } from '../types.js';
 
 export type { Tour, BookingEvent };
 

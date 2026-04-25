@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { allowlistAllows } from '../../src/messaging/allowlistGate';
-import type { AllowlistConfig } from '../../src/config/schemas';
+import { allowlistAllows } from '../../src/messaging/allowlistGate.js';
+import type { AllowlistConfig } from '../../src/config/schemas.js';
 
 const explicit: AllowlistConfig = {
   mode: 'explicit',

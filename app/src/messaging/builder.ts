@@ -1,5 +1,5 @@
-import type { Tour, BookingEvent } from '../types';
-import type { ToursConfig, TemplatesConfig } from '../config/schemas';
+import type { Tour, BookingEvent } from '../types.js';
+import type { ToursConfig, TemplatesConfig } from '../config/schemas.js';
 
 const WEEKDAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 

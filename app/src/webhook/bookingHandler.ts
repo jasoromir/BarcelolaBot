@@ -1,10 +1,10 @@
-import type { WebhookDedup } from '../persistence/webhookDedup';
-import type { AppLogger } from '../log/logger';
-import type { AppConfig } from '../config/loader';
-import type { DirectMessageSender } from '../messaging/directMessage';
-import { parseBookingWebhook } from '../wix/webhookVerifier';
-import { buildBookingConfirmation } from '../messaging/builder';
-import { normalizePhone } from '../messaging/phoneNormalizer';
+import type { WebhookDedup } from '../persistence/webhookDedup.js';
+import type { AppLogger } from '../log/logger.js';
+import type { AppConfig } from '../config/loader.js';
+import type { DirectMessageSender } from '../messaging/directMessage.js';
+import { parseBookingWebhook } from '../wix/webhookVerifier.js';
+import { buildBookingConfirmation } from '../messaging/builder.js';
+import { normalizePhone } from '../messaging/phoneNormalizer.js';
 
 export type HandlerOutcome =
   | { outcome: 'sent' }

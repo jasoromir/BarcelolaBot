@@ -1,8 +1,8 @@
-import type { WhatsAppClient } from '../whatsapp/types';
-import type { PendingDms } from '../persistence/pendingDms';
-import type { AllowlistConfig } from '../config/schemas';
-import { allowlistAllows } from './allowlistGate';
-import { retry, type RetryOpts } from './retry';
+import type { WhatsAppClient } from '../whatsapp/types.js';
+import type { PendingDms } from '../persistence/pendingDms.js';
+import type { AllowlistConfig } from '../config/schemas.js';
+import { allowlistAllows } from './allowlistGate.js';
+import { retry, type RetryOpts } from './retry.js';
 
 export type DmOutcome =
   | { outcome: 'sent'; messageId: string }

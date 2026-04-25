@@ -4,11 +4,22 @@ export type ISODateString = string; // e.g. "2026-04-25"
 export type ISODateTime = string; // e.g. "2026-04-25T19:30:00.000Z"
 
 export interface Tour {
-  id: string; // must match a key in tours.yaml
+  id: string; // serviceId from Wix — must match a key in tours.yaml
+  wixBookingId?: string; // the specific booking entry id (for joins back to raw)
   date: ISODateString;
   startTime: string; // "HH:mm" local (Europe/Madrid)
   endTime: string; // "HH:mm" local
-  bookingCount: number;
+  bookingCount: number; // total participants across all confirmed bookings for this session
+  tourTitle?: string; // bookedEntity.title, Wix-provided raw name
+  location?: string; // bookedEntity.location.address
+  participants?: Array<{
+    name: string;
+    phone: string;
+    email?: string;
+    count: number;
+    bookingId: string;
+    createdAt: string;
+  }>;
 }
 
 export interface BookingEvent {

@@ -1,17 +1,28 @@
 {
-  "id": "evt_001",
-  "entityId": "booking_42",
-  "eventType": "wix.bookings.v1.booking_confirmed",
   "data": {
     "booking": {
       "id": "booking_42",
-      "serviceId": "gaudi-modernista",
-      "startDate": "2026-04-26T08:30:00.000Z",
-      "contactDetails": {
-        "firstName": "Dana",
-        "lastName": "Levi",
-        "phone": "+972501234567"
-      }
+      "status": "CONFIRMED",
+      "createdDate": "2026-04-25T18:00:00.000Z",
+      "bookedEntity": {
+        "serviceId": "gaudi-modernista",
+        "title": "Gaudi Tour",
+        "singleSession": {
+          "start": "2026-04-26T08:30:00.000Z",
+          "end": "2026-04-26T11:30:00.000Z"
+        },
+        "location": { "address": "Barcelona, Spain" }
+      },
+      "formInfo": {
+        "contactDetails": {
+          "firstName": "Dana",
+          "lastName": "Levi",
+          "email": "dana@example.com",
+          "phone": "+972501234567"
+        },
+        "paymentSelection": [{ "numberOfParticipants": 2 }]
+      },
+      "totalParticipants": 2
     }
   }
 }

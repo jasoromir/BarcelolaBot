@@ -6,126 +6,205 @@ export interface WixClientOpts {
   siteId: string;
   baseUrl?: string;
   fetchFn?: typeof fetch;
+  timezone?: string; // defaults to Europe/Madrid
+  timeoutMs?: number; // defaults to 15000
 }
 
-interface WixBookingsApiResponse {
-  sessions: Array<{
-    session_id: string;
-    service_id: string;
-    start: string;
-    end: string;
-    total_participants: number;
-  }>;
+interface WixContactDetails {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  countryCode?: string;
 }
 
-function toHHmm(iso: string, tz: string): string {
-  const d = new Date(iso);
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
+interface WixBookingRaw {
+  id: string;
+  status?: string;
+  createdDate?: string;
+  _createdDate?: string;
+  _updatedDate?: string;
+  bookedEntity?: {
+    serviceId?: string;
+    title?: string;
+    location?: { address?: string };
+    singleSession?: { start?: string; end?: string; sessionId?: string };
+  };
+  formInfo?: {
+    contactDetails?: WixContactDetails;
+    paymentSelection?: Array<{ numberOfParticipants?: number }>;
+  };
+  totalParticipants?: number;
 }
 
-function toYYYYMMDD(iso: string, tz: string): string {
-  const d = new Date(iso);
+interface WixBookingsQueryResponse {
+  bookingsEntries?: Array<{ booking?: WixBookingRaw }>;
+  pagingMetadata?: { cursors?: { next?: string } };
+}
+
+function fmtInTz(iso: string, tz: string, opts: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour12: false, ...opts }).format(
+    new Date(iso),
+  );
+}
+
+function toLocalDate(iso: string, tz: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(d);
+  }).formatToParts(new Date(iso));
   const y = parts.find((p) => p.type === 'year')?.value;
   const m = parts.find((p) => p.type === 'month')?.value;
-  const day = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${day}`;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  return `${y}-${m}-${d}`;
 }
 
-// Compute start/end of the given local date in the configured tz, as UTC instants.
-function toUtcBoundary(
-  date: string,
-  hour: number,
-  minute: number,
-  second: number,
-  ms: number,
-  tz: string,
-): string {
-  // Using the same trick: create a UTC instant, compute offset via Intl, adjust.
-  const approx = new Date(
-    `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.${String(ms).padStart(3, '0')}Z`,
-  );
-  // Get what this instant looks like in the target tz
-  const fmt = new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-  const parts = fmt.formatToParts(approx);
-  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
-  // Construct the "clock reading" we just observed as a UTC Date
-  const observedAsUtc = Date.UTC(
-    get('year'),
-    get('month') - 1,
-    get('day'),
-    get('hour'),
-    get('minute'),
-    get('second'),
-    ms,
-  );
-  const offsetMs = observedAsUtc - approx.getTime();
-  return new Date(approx.getTime() - offsetMs).toISOString();
+function toLocalTime(iso: string, tz: string): string {
+  return fmtInTz(iso, tz, { hour: '2-digit', minute: '2-digit' });
+}
+
+function asName(c: WixContactDetails | undefined): string {
+  if (!c) return 'Guest';
+  const full = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim();
+  return full || c.email || 'Guest';
+}
+
+function participantCount(b: WixBookingRaw): number {
+  const n = b.formInfo?.paymentSelection?.[0]?.numberOfParticipants;
+  if (typeof n === 'number' && n > 0) return n;
+  if (typeof b.totalParticipants === 'number' && b.totalParticipants > 0) return b.totalParticipants;
+  return 1;
 }
 
 export function createWixClient(opts: WixClientOpts): WixClient {
   const base = opts.baseUrl ?? 'https://www.wixapis.com';
   const fetchFn = opts.fetchFn ?? fetch;
-  const tz = 'Europe/Madrid';
+  const tz = opts.timezone ?? 'Europe/Madrid';
+  const timeoutMs = opts.timeoutMs ?? 15000;
+
+  async function queryPage(
+    cursor: string | undefined,
+    startFromIso: string,
+  ): Promise<WixBookingsQueryResponse> {
+    const body = {
+      query: {
+        filter: { startTime: { $gte: startFromIso } },
+        paging: { limit: 100, ...(cursor ? { cursor } : {}) },
+        sort: [{ fieldName: 'startTime', order: 'ASC' }],
+      },
+    };
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetchFn(`${base}/bookings/v1/bookings/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: opts.apiKey,
+          'wix-site-id': opts.siteId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Wix bookings query failed: ${res.status} ${text}`);
+      }
+      return (await res.json()) as WixBookingsQueryResponse;
+    } finally {
+      clearTimeout(t);
+    }
+  }
 
   return {
     async getToursForDate(date: string): Promise<Tour[]> {
-      const url = `${base}/bookings/v2/sessions/query`;
-      const startUtc = toUtcBoundary(date, 0, 0, 0, 0, tz);
-      const endUtc = toUtcBoundary(date, 23, 59, 59, 999, tz);
-      const body = {
-        query: {
-          filter: {
-            start: { $gte: startUtc, $lt: endUtc },
-          },
-        },
-      };
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      try {
-        const res = await fetchFn(url, {
-          method: 'POST',
-          headers: {
-            Authorization: opts.apiKey,
-            'wix-site-id': opts.siteId,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          throw new Error(`Wix sessions query failed: ${res.status} ${await res.text()}`);
+      // Fetch bookings from start-of-local-date onward; stop once we cross end-of-local-date.
+      const startFromIso = new Date(`${date}T00:00:00.000Z`).toISOString();
+      // Local end-of-day as a UTC instant: take the last moment of the local day.
+      // Compute by formatting tomorrow-00:00 local as UTC.
+      const [y, m, d] = date.split('-').map(Number);
+      // Construct a UTC instant that represents local midnight; approximate and adjust by offset.
+      const localMidnightGuess = new Date(Date.UTC(y!, (m ?? 1) - 1, (d ?? 1) + 1, 0, 0, 0));
+      // Adjust for timezone offset: observe what this instant looks like in tz and back-calc.
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).formatToParts(localMidnightGuess);
+      const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+      const observedUtc = Date.UTC(
+        get('year'),
+        get('month') - 1,
+        get('day'),
+        get('hour'),
+        get('minute'),
+        get('second'),
+      );
+      const offsetMs = observedUtc - localMidnightGuess.getTime();
+      const endExclusiveMs = localMidnightGuess.getTime() - offsetMs;
+
+      const perSession: Map<string, Tour> = new Map();
+      let cursor: string | undefined = undefined;
+      const maxPages = 20;
+      for (let page = 0; page < maxPages; page++) {
+        const data = await queryPage(cursor, startFromIso);
+        const entries = data.bookingsEntries ?? [];
+        let passedEnd = false;
+        for (const e of entries) {
+          const b = e.booking;
+          if (!b) continue;
+          if (b.status && b.status !== 'CONFIRMED' && b.status !== 'APPROVED') continue;
+          const s = b.bookedEntity?.singleSession;
+          if (!s?.start || !s?.end) continue;
+          const startMs = new Date(s.start).getTime();
+          if (startMs >= endExclusiveMs) {
+            passedEnd = true;
+            break;
+          }
+          const serviceId = b.bookedEntity?.serviceId ?? 'unknown';
+          const sessionKey = s.sessionId || `${serviceId}-${s.start}`;
+          const count = participantCount(b);
+          const participant = {
+            name: asName(b.formInfo?.contactDetails),
+            phone: b.formInfo?.contactDetails?.phone ?? '',
+            email: b.formInfo?.contactDetails?.email,
+            count,
+            bookingId: b.id,
+            createdAt: b.createdDate ?? b._createdDate ?? '',
+          };
+          const existing = perSession.get(sessionKey);
+          if (existing) {
+            existing.bookingCount += count;
+            existing.participants!.push(participant);
+          } else {
+            perSession.set(sessionKey, {
+              id: serviceId,
+              date: toLocalDate(s.start, tz),
+              startTime: toLocalTime(s.start, tz),
+              endTime: toLocalTime(s.end, tz),
+              bookingCount: count,
+              tourTitle: b.bookedEntity?.title,
+              location: b.bookedEntity?.location?.address,
+              participants: [participant],
+            });
+          }
         }
-        const data = (await res.json()) as WixBookingsApiResponse;
-        return data.sessions.map((s) => ({
-          id: s.service_id,
-          date: toYYYYMMDD(s.start, tz),
-          startTime: toHHmm(s.start, tz),
-          endTime: toHHmm(s.end, tz),
-          bookingCount: s.total_participants,
-        }));
-      } finally {
-        clearTimeout(timeout);
+        if (passedEnd) break;
+        cursor = data.pagingMetadata?.cursors?.next;
+        if (!cursor) break;
       }
+
+      // Return only sessions that fall within the requested local date.
+      return [...perSession.values()]
+        .filter((t) => t.date === date)
+        .sort((a, b) => a.startTime.localeCompare(b.startTime));
     },
   };
 }

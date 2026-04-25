@@ -2,16 +2,24 @@ import { z } from 'zod';
 import type { BookingEvent } from '../types.js';
 
 const BookingWebhookSchema = z.object({
-  entityId: z.string(),
   data: z.object({
     booking: z.object({
       id: z.string().min(1),
-      serviceId: z.string().min(1),
-      startDate: z.string().min(1),
-      contactDetails: z.object({
-        firstName: z.string().optional(),
-        lastName: z.string().optional(),
-        phone: z.string().min(1),
+      bookedEntity: z.object({
+        serviceId: z.string().min(1),
+        title: z.string().optional(),
+        singleSession: z.object({
+          start: z.string().min(1),
+          end: z.string().optional(),
+        }),
+      }),
+      formInfo: z.object({
+        contactDetails: z.object({
+          firstName: z.string().optional(),
+          lastName: z.string().optional(),
+          email: z.string().optional(),
+          phone: z.string().min(1),
+        }),
       }),
     }),
   }),
@@ -48,17 +56,18 @@ export function parseBookingWebhook(payload: unknown): ParseResult {
   const parsed = BookingWebhookSchema.safeParse(payload);
   if (!parsed.success) return { ok: false, error: parsed.error.message };
   const b = parsed.data.data.booking;
-  const first = b.contactDetails.firstName ?? '';
-  const last = b.contactDetails.lastName ?? '';
+  const cd = b.formInfo.contactDetails;
+  const first = cd.firstName ?? '';
+  const last = cd.lastName ?? '';
   return {
     ok: true,
     event: {
       bookingId: b.id,
-      tourId: b.serviceId,
-      phone: b.contactDetails.phone,
-      clientName: [first, last].filter(Boolean).join(' ').trim() || 'Guest',
-      date: fmtDate(b.startDate),
-      time: fmtTime(b.startDate),
+      tourId: b.bookedEntity.serviceId,
+      phone: cd.phone,
+      clientName: [first, last].filter(Boolean).join(' ').trim() || (cd.email ?? 'Guest'),
+      date: fmtDate(b.bookedEntity.singleSession.start),
+      time: fmtTime(b.bookedEntity.singleSession.start),
     },
   };
 }
@@ -68,8 +77,6 @@ export interface SignatureVerifier {
 }
 
 export function createSignatureVerifier(signingSecret: string): SignatureVerifier {
-  // Wix signs webhooks; exact algorithm is documented per-webhook.
-  // v1: simple shared-secret header check; swap to HMAC at integration time.
   return {
     verify(_rawBody, header) {
       return header === signingSecret;

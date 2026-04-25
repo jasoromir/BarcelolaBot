@@ -65,6 +65,7 @@ async function main(): Promise<void> {
   const wix = createWixClient({
     apiKey: wixApiKey,
     siteId: wixSiteId,
+    baseUrl: process.env.WIX_BASE_URL || undefined,
   });
 
   const dmSender = new DirectMessageSender({

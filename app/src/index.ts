@@ -10,6 +10,10 @@ import { WebhookDedup } from './persistence/webhookDedup.js';
 import { PendingDms } from './persistence/pendingDms.js';
 import { ControlState } from './persistence/controlState.js';
 import { ControlStateService } from './control/state.js';
+import { RemindersStore, ReplyAuditStore } from './persistence/reminders.js';
+import { createGeminiClassifier } from './reminders/classifier.js';
+import { createReplyHandler } from './reminders/replyHandler.js';
+import { createReminderRunner } from './reminders/runner.js';
 import { createLogger } from './log/logger.js';
 import { createWhatsAppClient } from './whatsapp/client.js';
 import { createWixClient } from './wix/client.js';
@@ -47,6 +51,8 @@ async function main(): Promise<void> {
   const pendingDms = new PendingDms(db);
   const controlStateStore = new ControlState(db);
   const controlState = new ControlStateService(controlStateStore);
+  const reminders = new RemindersStore(db);
+  const replyAudit = new ReplyAuditStore(db);
 
   const cutoff = new Date(Date.now() - 3600_000).toISOString();
   const recovered = jobHistory.markStaleRunning(cutoff);
@@ -93,6 +99,22 @@ async function main(): Promise<void> {
     isPaused: () => controlState.isPaused(),
   });
 
+  const geminiApiKey = process.env.GEMINI_API_KEY ?? '';
+  const classifier = createGeminiClassifier(geminiApiKey);
+  const reminderRunner = createReminderRunner({
+    wa: whatsapp,
+    reminders,
+    logger,
+    config: { templates: config.templates, tours: config.tours },
+    settings: {
+      pollIntervalSeconds: config.settings.reminders.poll_interval_seconds,
+      officialContactNumber: config.settings.reminders.official_contact_number,
+      workerGroupId: config.settings.reminders.worker_group_id,
+    },
+    isPaused: () => controlState.isPaused(),
+    isConnected: () => whatsapp.state().kind === 'connected',
+  });
+
   const app: App = {
     db,
     config,
@@ -111,12 +133,45 @@ async function main(): Promise<void> {
     pendingDms,
     controlStateStore,
     controlState,
+    reminders,
+    replyAudit,
     whatsapp,
     wix,
     dmSender,
     logger,
+    reminderRunner,
+    replyHandler: null,
+    classifier: null,
     lastQrDataUrl: null,
   };
+
+  if (config.settings.reminders.enabled) {
+    if (!geminiApiKey) {
+      logger.warn({
+        source: 'startup',
+        eventType: 'gemini_missing_key',
+        message: 'reminders enabled but GEMINI_API_KEY not set; replies will always forward to worker',
+      });
+    }
+    const replyHandler = createReplyHandler({
+      wa: whatsapp,
+      wix,
+      reminders,
+      audit: replyAudit,
+      classifier,
+      logger,
+      settings: {
+        officialContactNumber: config.settings.reminders.official_contact_number,
+        workerGroupId: config.settings.reminders.worker_group_id,
+        confidenceThreshold: config.settings.reminders.classifier_confidence_threshold,
+      },
+      config: { templates: config.templates, tours: config.tours },
+    });
+    whatsapp.onIncomingDm(replyHandler);
+    app.replyHandler = replyHandler;
+    app.classifier = classifier;
+    reminderRunner.start();
+  }
 
   whatsapp.onStateChange(async (s) => {
     if (s.kind === 'connected') {

@@ -28,6 +28,7 @@ export interface BookingEvent {
   tourTitle?: string; // from Wix bookedEntity.title, fallback when not in tours.yaml
   date: ISODateString;
   time: string; // "HH:mm"
+  startAtIso: ISODateTime; // absolute instant of tour start
   clientName: string;
   phone: string; // as received from Wix (not yet normalized)
   participantCount?: number;

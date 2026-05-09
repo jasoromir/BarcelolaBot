@@ -23,6 +23,7 @@ export function registerWebhookRoutes(exp: Express, app: App): void {
         sender: app.dmSender,
         logger: app.logger,
         isPaused: () => app.controlState.isPaused(),
+        reminders: app.reminders,
       });
       // Always 200 so Wix retries stop; we've either sent, skipped, or deferred-to-queue.
       res.status(200).json({ received: true, outcome: outcome.outcome });

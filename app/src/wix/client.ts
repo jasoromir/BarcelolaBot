@@ -1,5 +1,9 @@
 import type { Tour } from '../types.js';
-import type { WixClient } from './types.js';
+import type {
+  CancelBookingInput,
+  CancelBookingResult,
+  WixClient,
+} from './types.js';
 
 export interface WixClientOpts {
   apiKey: string;
@@ -205,6 +209,51 @@ export function createWixClient(opts: WixClientOpts): WixClient {
       return [...perSession.values()]
         .filter((t) => t.date === date)
         .sort((a, b) => a.startTime.localeCompare(b.startTime));
+    },
+
+    async cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult> {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetchFn(
+          `${base}/bookings/v2/bookings/${encodeURIComponent(input.bookingId)}/cancel`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: opts.apiKey,
+              'wix-site-id': opts.siteId,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              participantNotification: { notifyParticipants: false },
+              revision: '1',
+              flowControlSettings: {
+                skipCancellationPolicyCheck: true,
+                skipRefund: true,
+                skipBusinessNotification: false,
+              },
+              initiator: 'CUSTOMER',
+              reason: input.reason,
+            }),
+            signal: controller.signal,
+          },
+        );
+        if (!res.ok) {
+          const text = await res.text();
+          if (res.status === 409 || /already.*canc/i.test(text)) {
+            return { ok: true, alreadyCancelled: true };
+          }
+          return {
+            ok: false,
+            error: `cancel failed ${res.status}: ${text.slice(0, 300)}`,
+          };
+        }
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      } finally {
+        clearTimeout(t);
+      }
     },
   };
 }

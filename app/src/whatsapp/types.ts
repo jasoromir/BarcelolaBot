@@ -19,6 +19,15 @@ export interface MessageInfo {
   hasMedia: boolean;
 }
 
+export interface IncomingDm {
+  messageId: string;
+  fromPhoneE164: string;
+  body: string;
+  timestamp: number;
+}
+
+export type IncomingDmHandler = (dm: IncomingDm) => void | Promise<void>;
+
 export interface WhatsAppClient {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -35,4 +44,6 @@ export interface WhatsAppClient {
   getMessages(chatId: string, limit: number): Promise<MessageInfo[]>;
   forwardMessage(messageId: string, toChatId: string): Promise<SendResult>;
   sendSticker(toChatId: string, messageId: string): Promise<SendResult>;
+
+  onIncomingDm(handler: IncomingDmHandler): void;
 }

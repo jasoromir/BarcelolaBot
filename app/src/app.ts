@@ -10,6 +10,10 @@ import type { WhatsAppClient } from './whatsapp/types.js';
 import type { WixClient } from './wix/types.js';
 import type { DirectMessageSender } from './messaging/directMessage.js';
 import type { AppLogger } from './log/logger.js';
+import type { RemindersStore, ReplyAuditStore } from './persistence/reminders.js';
+import type { ReminderRunner } from './reminders/runner.js';
+import type { Classifier } from './reminders/classifier.js';
+import type { IncomingDm } from './whatsapp/types.js';
 
 export interface App {
   db: DB;
@@ -22,11 +26,18 @@ export interface App {
   pendingDms: PendingDms;
   controlStateStore: ControlState;
   controlState: ControlStateService;
+  reminders: RemindersStore;
+  replyAudit: ReplyAuditStore;
 
   whatsapp: WhatsAppClient;
   wix: WixClient;
   dmSender: DirectMessageSender;
   logger: AppLogger;
+  reminderRunner: ReminderRunner;
+  /** Exposed so admin /simulate-reply can inject synthetic DMs. Null if reminders disabled. */
+  replyHandler: ((dm: IncomingDm) => Promise<void>) | null;
+  /** Exposed so admin /classify can call it directly. Null if reminders disabled. */
+  classifier: Classifier | null;
 
   lastQrDataUrl: string | null;
 }

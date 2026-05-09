@@ -3,7 +3,7 @@ import path from 'node:path';
 import pkg from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import type { WhatsAppState } from '../types.js';
-import type { SendResult, WhatsAppClient } from './types.js';
+import type { IncomingDmHandler, SendResult, WhatsAppClient } from './types.js';
 
 const { Client, LocalAuth } = pkg;
 
@@ -42,6 +42,7 @@ type Listener = (s: WhatsAppState) => void;
 
 export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   const listeners: Listener[] = [];
+  const dmHandlers: IncomingDmHandler[] = [];
   let current: WhatsAppState = { kind: 'disconnected' };
   const setState = (s: WhatsAppState) => {
     current = s;
@@ -77,6 +78,27 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   });
   client.on('disconnected', () => setState({ kind: 'disconnected' }));
   client.on('auth_failure', () => setState({ kind: 'disconnected' }));
+
+  client.on('message', (msg: any) => {
+    // Ignore own messages, groups, non-text, and status broadcasts.
+    if (msg.fromMe) return;
+    const from: string = msg.from ?? '';
+    if (!from.endsWith('@c.us')) return;
+    if (typeof msg.body !== 'string' || msg.body.length === 0) return;
+    const digits = from.replace(/@c\.us$/, '');
+    const fromPhoneE164 = digits.startsWith('+') ? digits : `+${digits}`;
+    const dm = {
+      messageId: msg.id?._serialized ?? '',
+      fromPhoneE164,
+      body: msg.body,
+      timestamp: typeof msg.timestamp === 'number' ? msg.timestamp : Math.floor(Date.now() / 1000),
+    };
+    for (const h of dmHandlers) {
+      Promise.resolve(h(dm)).catch(() => {
+        // handler failures must not kill the client
+      });
+    }
+  });
 
   async function sendToGroup(groupId: string, body: string): Promise<SendResult> {
     const msg = await client.sendMessage(groupId, body);
@@ -178,5 +200,6 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     getMessages,
     forwardMessage,
     sendSticker,
+    onIncomingDm: (h) => dmHandlers.push(h),
   };
 }

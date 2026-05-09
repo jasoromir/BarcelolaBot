@@ -21,7 +21,15 @@ const templates: TemplatesConfig = {
   morning_header: 'MORNING {weekday_he} {date}',
   footer: 'FOOTER',
   tour_block: '{emoji} {time_range} | {name_he} | {description_he} | {meeting_point_he}',
-  booking_confirmation: 'HI {client_name} / {tour_name_he} / {date} {time}',
+  booking_confirmation: 'HI {client_name} / {tour_name_he} / {date} {time} / {participant_count} / {anti_reply_footer}',
+  booking_confirmation_lt24h:
+    'COMBINED {client_name} / {tour_name_he} / {date} {time} / {participant_count} / {anti_reply_footer}',
+  reminder_24h: 'R24 {client_name}',
+  confirmation_ack: 'ACK {client_name}',
+  cancel_ack: 'CANCEL {client_name}',
+  anti_reply_footer: 'FOOTER({official_contact_number})',
+  no_reply_alert: 'NORE {tour_name_he}',
+  worker_forward: 'FWD {client_name}',
 };
 
 describe('buildBroadcastMessage', () => {
@@ -42,7 +50,7 @@ describe('buildBroadcastMessage', () => {
     expect(out).toContain('FOOTER');
   });
 
-  it('skips tours with no config entry and logs name', () => {
+  it('skips tours with no config entry', () => {
     const out = buildBroadcastMessage({
       kind: 'night',
       date: '2026-04-26',
@@ -59,35 +67,65 @@ describe('buildBroadcastMessage', () => {
 });
 
 describe('buildBookingConfirmation', () => {
-  it('interpolates booking fields', () => {
+  it('interpolates booking fields and includes anti-reply footer', () => {
     const out = buildBookingConfirmation({
       event: {
         bookingId: 'b1',
         tourId: 'gaudi-modernista',
         date: '2026-04-26',
         time: '10:30',
+        startAtIso: '2026-04-26T10:30:00.000Z',
         clientName: 'Dana',
         phone: '+972501234567',
+        participantCount: 2,
       },
       toursConfig: tours,
       templates,
+      officialContactNumber: '+34623964800',
     });
-    expect(out).toBe('HI Dana / גאודי / 2026-04-26 10:30');
+    expect(out).toBe(
+      'HI Dana / גאודי / 26/04/26 10:30 / 2 / FOOTER(+34623964800)',
+    );
   });
 
-  it('falls back to tour id when no config entry', () => {
+  it('uses Wix tour title when no config entry', () => {
     const out = buildBookingConfirmation({
       event: {
         bookingId: 'b1',
         tourId: 'unknown',
+        tourTitle: 'Wix Title',
         date: '2026-04-26',
         time: '10:30',
+        startAtIso: '2026-04-26T10:30:00.000Z',
         clientName: 'Dana',
         phone: '+972501234567',
+        participantCount: 1,
       },
       toursConfig: tours,
       templates,
+      officialContactNumber: '+34623964800',
     });
-    expect(out).toContain('unknown');
+    expect(out).toContain('Wix Title');
+  });
+
+  it('uses lt24h template when combined=true', () => {
+    const out = buildBookingConfirmation({
+      event: {
+        bookingId: 'b1',
+        tourId: 'gaudi-modernista',
+        date: '2026-04-26',
+        time: '10:30',
+        startAtIso: '2026-04-26T10:30:00.000Z',
+        clientName: 'Dana',
+        phone: '+972501234567',
+        participantCount: 3,
+      },
+      toursConfig: tours,
+      templates,
+      combined: true,
+      officialContactNumber: '+34623964800',
+    });
+    expect(out).toContain('COMBINED');
+    expect(out).toContain('Dana');
   });
 });

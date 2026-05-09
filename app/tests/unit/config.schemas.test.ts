@@ -65,6 +65,16 @@ describe('SettingsConfigSchema', () => {
       broadcast: { mode: 'test', test_group_id: '120@g.us', inter_message_delay_ms: 2000 },
       min_bookings_to_run: 1,
       retry: { max_attempts: 3, backoff_ms: [60000, 300000, 900000] },
+      reminders: {
+        enabled: true,
+        lead_time_hours: 24,
+        combine_threshold_hours: 24,
+        no_reply_alert_minutes_before: 120,
+        poll_interval_seconds: 30,
+        official_contact_number: '+34623964800',
+        worker_group_id: '120@g.us',
+        classifier_confidence_threshold: 0.7,
+      },
     };
     expect(SettingsConfigSchema.parse(v).broadcast.mode).toBe('test');
   });

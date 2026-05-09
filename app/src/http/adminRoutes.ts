@@ -128,6 +128,98 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
   exp.post('/admin/api/groups/close-all', async (_req, res) => bulkGroupAction('close', res));
   exp.post('/admin/api/groups/open-all', async (_req, res) => bulkGroupAction('open', res));
 
+  // ---- Reminder test endpoints --------------------------------------------
+  // Fire any reminder immediately regardless of its send_at time.
+  exp.post('/admin/api/reminders/fire-now', async (req, res) => {
+    const bookingId = (req.body?.booking_id as string) || (req.query.booking_id as string);
+    if (!bookingId) {
+      res.status(400).json({ error: 'booking_id required' });
+      return;
+    }
+    const r = app.reminders.get(bookingId);
+    if (!r) {
+      res.status(404).json({ error: 'reminder not found' });
+      return;
+    }
+    // Force send_at to now so the runner picks it up; then tick.
+    app.reminders.upsert({
+      ...r,
+      status: 'awaiting_send',
+      sendAtIso: new Date().toISOString(),
+      sentAtIso: null,
+    });
+    const result = await app.reminderRunner.tick();
+    res.json({ ok: true, result });
+  });
+
+  // Inject a fake inbound DM for testing the classify+handle path without
+  // needing the customer to actually message the bot.
+  exp.post('/admin/api/reminders/simulate-reply', async (req, res) => {
+    const bookingId = req.body?.booking_id as string | undefined;
+    const text = req.body?.text as string | undefined;
+    if (!bookingId || !text) {
+      res.status(400).json({ error: 'booking_id and text required' });
+      return;
+    }
+    const r = app.reminders.get(bookingId);
+    if (!r) {
+      res.status(404).json({ error: 'reminder not found' });
+      return;
+    }
+    // Use the real WhatsApp incoming-DM pipeline by invoking the handler
+    // the same way a real message would. Because onIncomingDm is private to
+    // the client, we call the reply handler through a direct simulate path:
+    // easiest is to emit via the client, but we can re-invoke classifier + handler.
+    // Simpler: the whatsapp client exposes onIncomingDm which allows handlers to
+    // be appended; we can't reach the handlers from here. So we go through a
+    // public stub: send ourselves a message on behalf of the phone by creating
+    // a synthetic DM event via a dedicated simulate hook.
+    const fakeDm = {
+      messageId: `simulated-${Date.now()}`,
+      fromPhoneE164: r.phone,
+      body: text,
+      timestamp: Math.floor(Date.now() / 1000),
+    };
+    if (!app.replyHandler) {
+      res.status(500).json({ error: 'reply handler not attached (reminders disabled?)' });
+      return;
+    }
+    await app.replyHandler(fakeDm);
+    res.json({ ok: true });
+  });
+
+  exp.get('/admin/api/reminders/classify', async (req, res) => {
+    const text = (req.query.text as string) ?? '';
+    if (!text) {
+      res.status(400).json({ error: 'text query param required' });
+      return;
+    }
+    const currentCount = Number((req.query.current_count as string) ?? 1);
+    if (!app.classifier) {
+      res.status(500).json({ error: 'classifier not attached (reminders disabled?)' });
+      return;
+    }
+    try {
+      const result = await app.classifier.classify(text, { currentCount });
+      res.json({ ok: true, result });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  exp.post('/admin/api/reminders/run-noreply-check', async (req, res) => {
+    const minutesBefore = Number(req.body?.minutes_before ?? 120);
+    const result = await app.reminderRunner.runNoReplyCheck(minutesBefore);
+    res.json({ ok: true, result });
+  });
+
+  exp.get('/admin/api/reminders', (_req, res) => {
+    const rows = app.db
+      .prepare('SELECT * FROM reminders ORDER BY created_at DESC LIMIT 50')
+      .all();
+    res.json({ reminders: rows });
+  });
+
   exp.post('/admin/api/config/reload', (_req, res) => {
     try {
       app.reloadConfig();

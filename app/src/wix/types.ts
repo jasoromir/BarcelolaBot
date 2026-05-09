@@ -2,6 +2,18 @@ import type { Tour, BookingEvent } from '../types.js';
 
 export type { Tour, BookingEvent };
 
+export interface CancelBookingInput {
+  bookingId: string;
+  reason: string;
+}
+
+export interface CancelBookingResult {
+  ok: boolean;
+  alreadyCancelled?: boolean;
+  error?: string;
+}
+
 export interface WixClient {
   getToursForDate(date: string): Promise<Tour[]>;
+  cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult>;
 }

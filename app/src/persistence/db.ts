@@ -50,6 +50,38 @@ const MIGRATIONS = [
      value TEXT NOT NULL,
      updated_at TEXT NOT NULL
    )`,
+  `CREATE TABLE IF NOT EXISTS reminders (
+     booking_id TEXT PRIMARY KEY,
+     phone TEXT NOT NULL,
+     client_name TEXT,
+     tour_id TEXT,
+     tour_name_he TEXT,
+     start_at_iso TEXT NOT NULL,
+     participant_count INTEGER NOT NULL DEFAULT 1,
+     status TEXT NOT NULL,
+     send_at_iso TEXT,
+     sent_at_iso TEXT,
+     last_reply_ts TEXT,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_reminders_send_at ON reminders(send_at_iso) WHERE sent_at_iso IS NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_reminders_phone ON reminders(phone)`,
+  `CREATE TABLE IF NOT EXISTS reply_audit (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     ts TEXT NOT NULL,
+     phone TEXT NOT NULL,
+     booking_id TEXT,
+     raw_text TEXT NOT NULL,
+     intent TEXT,
+     participant_count INTEGER,
+     confidence REAL,
+     forwarded INTEGER DEFAULT 0,
+     notes TEXT
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_reply_audit_ts ON reply_audit(ts DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_reply_audit_phone ON reply_audit(phone)`,
 ];
 
 const SEEDS: Array<[string, string]> = [

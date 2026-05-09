@@ -35,4 +35,77 @@ booking_confirmation: |
 
   https://chat.whatsapp.com/IyJ1FzdxjUxLvJNk8gCOLQ
 
-  על כל שינוי או ביטול נא צרו עמנו קשר דרך קבוצת הווטסאפ או במייל.
+  {anti_reply_footer}
+
+booking_confirmation_lt24h: |
+  הולה {client_name}! 👋
+  כאן ברצלולה 🌻
+  תודה שנרשמת לסיור שלנו! 🥳
+
+  זהו אישור הזמנה להרשמה לסיור *{tour_name_he}* בתאריך {date} בשעה {time} עבור {participant_count} משתתפים.
+
+  ⏰ *הסיור מתקיים בקרוב!*
+  אנא השיבו להודעה זו 👇
+  ✅ *"מאשר"* — אם אתם מגיעים ({participant_count} משתתפים)
+  🔢 *מספר משתתפים חדש* — אם השתנה מספר האנשים
+  ❌ *"מבטל"* — אם אתם לא יכולים להגיע
+
+  🌻 הצטרפו גם לקבוצת הווטסאפ שלנו לטיפים והמלצות על ברצלונה:
+  https://chat.whatsapp.com/IyJ1FzdxjUxLvJNk8gCOLQ
+
+  {anti_reply_footer}
+
+reminder_24h: |
+  הולה {client_name}! 👋
+  כאן ברצלולה 🌻
+
+  ⏰ מזכירים שיש לכם סיור *{tour_name_he}* מחר בתאריך {date} בשעה {time}.
+
+  אנא השיבו להודעה זו 👇
+  ✅ *"מאשר"* — אם אתם מגיעים ({participant_count} משתתפים)
+  🔢 *מספר משתתפים חדש* — אם השתנה מספר האנשים
+  ❌ *"מבטל"* — אם אתם לא יכולים להגיע
+
+  {anti_reply_footer}
+
+confirmation_ack: |
+  תודה {client_name}! 🌻
+  ההזמנה שלכם ל-*{tour_name_he}* בתאריך {date} בשעה {time} אושרה עבור {participant_count} משתתפים ✅
+
+  מתרגשים לראותכם מחר! 🎉
+
+  📍 *נקודת מפגש:* {meeting_point_he}
+  {maps_url_line}
+
+  🌻 חפשו את המדריך/ה שלנו עם חמנייה!
+
+  {anti_reply_footer}
+
+cancel_ack: |
+  ביטול התקבל 🌻
+  חבל שלא תוכלו להצטרף הפעם, {client_name}.
+  נשמח לראותכם בסיור אחר בעתיד! ❤️
+
+  לכל שאלה אנא פנו ל-{official_contact_number}
+
+anti_reply_footer: |
+  ⚠️ *שימו לב:* לשאלות או מידע נוסף פנו אלינו דרך {official_contact_number}.
+  בהודעה זו תוכלו להשיב רק עם "מאשר" / "מבטל" / מספר משתתפים חדש.
+
+no_reply_alert: |
+  ⚠️ *תזכורת: לא התקבלה תשובה*
+  סיור: *{tour_name_he}*
+  תאריך: {date} בשעה {time}
+
+  לקוחות שלא הגיבו:
+  {client_list}
+
+worker_forward: |
+  💬 *הודעה מלקוח שלא קשורה לאישור/ביטול*
+
+  👤 *לקוח:* {client_name}
+  📞 {phone}
+  🎯 *סיור:* {tour_name_he} — {date} {time}
+
+  *ההודעה שלו:*
+  _{message}_

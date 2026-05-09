@@ -106,6 +106,7 @@ export function parseBookingWebhook(payload: unknown): ParseResult {
         clientName: [first, last].filter(Boolean).join(' ').trim() || (cd.email ?? 'Guest'),
         date: fmtDate(b.bookedEntity.singleSession.start),
         time: fmtTime(b.bookedEntity.singleSession.start),
+        startAtIso: new Date(b.bookedEntity.singleSession.start).toISOString(),
         participantCount: participantCount || 1,
       },
     };
@@ -131,6 +132,7 @@ export function parseBookingWebhook(payload: unknown): ParseResult {
         clientName,
         date: fmtDate(d.start_date),
         time: fmtTime(d.start_date),
+        startAtIso: new Date(d.start_date).toISOString(),
         participantCount: d.number_of_participants ?? 1,
       },
     };

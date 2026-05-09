@@ -23,6 +23,7 @@ export const ToursConfigSchema = z.object({
       emoji: z.string().min(1),
       description_he: z.string().min(1),
       meeting_point_he: z.string().min(1),
+      google_maps_url: z.string().url().optional(),
     }),
   ),
 });
@@ -34,6 +35,13 @@ export const TemplatesConfigSchema = z.object({
   footer: z.string().min(1),
   tour_block: z.string().min(1),
   booking_confirmation: z.string().min(1),
+  booking_confirmation_lt24h: z.string().min(1),
+  reminder_24h: z.string().min(1),
+  confirmation_ack: z.string().min(1),
+  cancel_ack: z.string().min(1),
+  anti_reply_footer: z.string().min(1),
+  no_reply_alert: z.string().min(1),
+  worker_forward: z.string().min(1),
 });
 export type TemplatesConfig = z.infer<typeof TemplatesConfigSchema>;
 
@@ -61,6 +69,16 @@ export const SettingsConfigSchema = z.object({
   retry: z.object({
     max_attempts: z.number().int().positive(),
     backoff_ms: z.array(z.number().int().nonnegative()),
+  }),
+  reminders: z.object({
+    enabled: z.boolean(),
+    lead_time_hours: z.number().positive(),
+    combine_threshold_hours: z.number().positive(),
+    no_reply_alert_minutes_before: z.number().int().positive(),
+    poll_interval_seconds: z.number().int().positive(),
+    official_contact_number: PhoneSchema,
+    worker_group_id: GroupIdSchema,
+    classifier_confidence_threshold: z.number().min(0).max(1),
   }),
 });
 export type SettingsConfig = z.infer<typeof SettingsConfigSchema>;

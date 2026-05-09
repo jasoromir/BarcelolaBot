@@ -28,6 +28,11 @@ function fakeClient(partial: Partial<WhatsAppClient> = {}): WhatsAppClient {
     sendDirect: vi.fn(async () => ({ messageId: 'x' }) as SendResult),
     isGroupAdmin: vi.fn(async () => true),
     setGroupMessagesAdminsOnly: vi.fn(async () => {}),
+    listChats: vi.fn(async () => []),
+    getMessages: vi.fn(async () => []),
+    forwardMessage: vi.fn(async () => ({ messageId: 'x' }) as SendResult),
+    sendSticker: vi.fn(async () => ({ messageId: 'x' }) as SendResult),
+    onIncomingDm: vi.fn(),
     ...partial,
   };
 }
@@ -46,6 +51,13 @@ function fakeConfig(mode: 'open' | 'explicit' = 'open'): AppConfig {
       night_header: 'N', morning_header: 'M', footer: 'F',
       tour_block: '{emoji} {time_range} {name_he}',
       booking_confirmation: 'HI {client_name} {tour_name_he}',
+      booking_confirmation_lt24h: 'HILT24 {client_name} {tour_name_he}',
+      reminder_24h: 'R24 {client_name}',
+      confirmation_ack: 'ACK {client_name}',
+      cancel_ack: 'CX {client_name}',
+      anti_reply_footer: 'FTR {official_contact_number}',
+      no_reply_alert: 'NR {tour_name_he}',
+      worker_forward: 'FW {client_name}',
     },
     allowlist: {
       mode,
@@ -55,9 +67,19 @@ function fakeConfig(mode: 'open' | 'explicit' = 'open'): AppConfig {
     settings: {
       timezone: 'Europe/Madrid',
       schedule: { nightly_cron: '30 21 * * *', morning_cron: '30 8 * * *' },
-      broadcast: { mode: 'test', test_group_id: 'test@g.us', inter_message_delay_ms: 0 },
+      broadcast: { mode: 'test', test_group_id: '120@g.us', inter_message_delay_ms: 0 },
       min_bookings_to_run: 1,
       retry: { max_attempts: 1, backoff_ms: [] },
+      reminders: {
+        enabled: false,
+        lead_time_hours: 24,
+        combine_threshold_hours: 24,
+        no_reply_alert_minutes_before: 120,
+        poll_interval_seconds: 30,
+        official_contact_number: '+34623964800',
+        worker_group_id: '120@g.us',
+        classifier_confidence_threshold: 0.7,
+      },
     },
   };
 }

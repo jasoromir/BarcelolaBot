@@ -11,8 +11,11 @@ import { PendingDms } from './persistence/pendingDms.js';
 import { ControlState } from './persistence/controlState.js';
 import { ControlStateService } from './control/state.js';
 import { RemindersStore, ReplyAuditStore } from './persistence/reminders.js';
+import { WorkerForwardsStore } from './persistence/workerForwards.js';
 import { createGeminiClassifier } from './reminders/classifier.js';
+import { createGeminiDrafter } from './reminders/drafter.js';
 import { createReplyHandler } from './reminders/replyHandler.js';
+import { createReactionHandler } from './reminders/reactionHandler.js';
 import { createReminderRunner } from './reminders/runner.js';
 import { createLogger } from './log/logger.js';
 import { createWhatsAppClient } from './whatsapp/client.js';
@@ -53,6 +56,7 @@ async function main(): Promise<void> {
   const controlState = new ControlStateService(controlStateStore);
   const reminders = new RemindersStore(db);
   const replyAudit = new ReplyAuditStore(db);
+  const workerForwards = new WorkerForwardsStore(db);
 
   const cutoff = new Date(Date.now() - 3600_000).toISOString();
   const recovered = jobHistory.markStaleRunning(cutoff);
@@ -101,6 +105,7 @@ async function main(): Promise<void> {
 
   const geminiApiKey = process.env.GEMINI_API_KEY ?? '';
   const classifier = createGeminiClassifier(geminiApiKey);
+  const drafter = geminiApiKey ? createGeminiDrafter(geminiApiKey) : null;
   const reminderRunner = createReminderRunner({
     wa: whatsapp,
     reminders,
@@ -135,6 +140,7 @@ async function main(): Promise<void> {
     controlState,
     reminders,
     replyAudit,
+    workerForwards,
     whatsapp,
     wix,
     dmSender,
@@ -158,7 +164,9 @@ async function main(): Promise<void> {
       wix,
       reminders,
       audit: replyAudit,
+      workerForwards,
       classifier,
+      drafter,
       logger,
       settings: {
         officialContactNumber: config.settings.reminders.official_contact_number,
@@ -172,6 +180,14 @@ async function main(): Promise<void> {
     whatsapp.onIncomingDm(replyHandler);
     app.replyHandler = replyHandler;
     app.classifier = classifier;
+
+    const reactionHandler = createReactionHandler({
+      wa: whatsapp,
+      workerForwards,
+      logger,
+      settings: { workerGroupId: config.settings.reminders.worker_group_id },
+    });
+    whatsapp.onReaction(reactionHandler);
     reminderRunner.start();
   }
 

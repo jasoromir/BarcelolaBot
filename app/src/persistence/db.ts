@@ -82,6 +82,18 @@ const MIGRATIONS = [
    )`,
   `CREATE INDEX IF NOT EXISTS idx_reply_audit_ts ON reply_audit(ts DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_reply_audit_phone ON reply_audit(phone)`,
+  `CREATE TABLE IF NOT EXISTS worker_forwards (
+     group_message_id TEXT PRIMARY KEY,
+     booking_id TEXT NOT NULL,
+     phone TEXT NOT NULL,
+     client_name TEXT,
+     customer_message TEXT NOT NULL,
+     suggested_reply TEXT,
+     status TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     sent_at TEXT
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_worker_forwards_status ON worker_forwards(status)`,
 ];
 
 const SEEDS: Array<[string, string]> = [

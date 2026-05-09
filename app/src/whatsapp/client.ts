@@ -3,7 +3,12 @@ import path from 'node:path';
 import pkg from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import type { WhatsAppState } from '../types.js';
-import type { IncomingDmHandler, SendResult, WhatsAppClient } from './types.js';
+import type {
+  IncomingDmHandler,
+  ReactionHandler,
+  SendResult,
+  WhatsAppClient,
+} from './types.js';
 
 const { Client, LocalAuth } = pkg;
 
@@ -43,6 +48,7 @@ type Listener = (s: WhatsAppState) => void;
 export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   const listeners: Listener[] = [];
   const dmHandlers: IncomingDmHandler[] = [];
+  const reactionHandlers: ReactionHandler[] = [];
   let current: WhatsAppState = { kind: 'disconnected' };
   const setState = (s: WhatsAppState) => {
     current = s;
@@ -183,6 +189,29 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     );
   });
 
+  client.on('message_reaction', (reaction: any) => {
+    try {
+      // whatsapp-web.js emits every reaction update, including removals (reaction === '').
+      const emoji: string = typeof reaction?.reaction === 'string' ? reaction.reaction : '';
+      const targetMessageId: string = reaction?.msgId?._serialized ?? '';
+      const chatId: string = reaction?.msgId?.remote?._serialized ?? reaction?.msgId?.remote ?? '';
+      const ts: number =
+        typeof reaction?.timestamp === 'number' ? reaction.timestamp : Math.floor(Date.now() / 1000);
+      console.log(
+        `[wa:message_reaction] target=${targetMessageId} emoji=${JSON.stringify(emoji)} chat=${chatId}`,
+      );
+      if (!emoji || !targetMessageId) return;
+      const ev = { targetMessageId, reaction: emoji, chatId, timestamp: ts };
+      for (const h of reactionHandlers) {
+        Promise.resolve(h(ev)).catch((err) => {
+          console.error('[wa:reactionHandler] error', err);
+        });
+      }
+    } catch (err) {
+      console.error('[wa:message_reaction] dispatch failed', err);
+    }
+  });
+
   async function sendToGroup(groupId: string, body: string): Promise<SendResult> {
     const msg = await client.sendMessage(groupId, body);
     return { messageId: msg.id._serialized };
@@ -284,5 +313,6 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     forwardMessage,
     sendSticker,
     onIncomingDm: (h) => dmHandlers.push(h),
+    onReaction: (h) => reactionHandlers.push(h),
   };
 }

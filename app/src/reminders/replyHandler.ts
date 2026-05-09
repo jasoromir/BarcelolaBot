@@ -1,9 +1,11 @@
 import type { AppLogger } from '../log/logger.js';
 import type { ReminderRow, RemindersStore, ReplyAuditStore } from '../persistence/reminders.js';
+import type { WorkerForwardsStore } from '../persistence/workerForwards.js';
 import type { WhatsAppClient, IncomingDm } from '../whatsapp/types.js';
 import type { WixClient } from '../wix/types.js';
 import type { TemplatesConfig, ToursConfig } from '../config/schemas.js';
 import type { Classifier, ClassificationResult } from './classifier.js';
+import type { Drafter } from './drafter.js';
 import {
   buildConfirmationAck,
   buildCancelAck,
@@ -17,7 +19,9 @@ export interface ReplyHandlerDeps {
   wix: WixClient;
   reminders: RemindersStore;
   audit: ReplyAuditStore;
+  workerForwards: WorkerForwardsStore;
   classifier: Classifier;
+  drafter: Drafter | null;
   logger: AppLogger;
   settings: {
     officialContactNumber: string;
@@ -329,12 +333,71 @@ async function forwardToWorker(
   dm: IncomingDm,
   reason: string,
 ): Promise<void> {
+  // Draft a suggested reply in the background. If drafting fails we still
+  // forward the message (template shows a "no suggestion" placeholder).
+  let suggestedReply: string | null = null;
+  if (deps.drafter) {
+    try {
+      const fmt = (iso: string) => {
+        const d = new Date(iso);
+        const date = d.toLocaleDateString('en-GB', {
+          timeZone: 'Europe/Madrid',
+          day: '2-digit',
+          month: '2-digit',
+          year: '2-digit',
+        });
+        const time = d.toLocaleTimeString('en-GB', {
+          timeZone: 'Europe/Madrid',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+        return { date, time };
+      };
+      const { date, time } = fmt(reminder.startAtIso);
+      suggestedReply = await deps.drafter.draft({
+        clientName: reminder.clientName ?? 'Guest',
+        tourNameHe: reminder.tourNameHe ?? '(unknown)',
+        dateDisplay: date,
+        timeDisplay: time,
+        customerMessage: dm.body,
+      });
+    } catch (err) {
+      deps.logger.warn({
+        source: 'reply',
+        eventType: 'drafter_failed',
+        message: (err as Error).message,
+      });
+    }
+  }
+
   const forward = buildWorkerForward({
     reminder,
     templates: deps.config.templates,
     message: dm.body,
+    suggestedReply,
   });
-  await safeSendGroup(deps, deps.settings.workerGroupId, forward, `forward:${reason}`);
+  let sendResult;
+  try {
+    sendResult = await deps.wa.sendToGroup(deps.settings.workerGroupId, forward);
+  } catch (err) {
+    deps.logger.error({
+      source: 'reply',
+      eventType: 'worker_notify_failed',
+      message: `forward:${reason}: ${(err as Error).message}`,
+    });
+    return;
+  }
+  if (suggestedReply && sendResult?.messageId) {
+    deps.workerForwards.insert({
+      groupMessageId: sendResult.messageId,
+      bookingId: reminder.bookingId,
+      phone: reminder.phone,
+      clientName: reminder.clientName,
+      customerMessage: dm.body,
+      suggestedReply,
+    });
+  }
 }
 
 async function safeSend(

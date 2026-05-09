@@ -33,6 +33,7 @@ function fakeClient(partial: Partial<WhatsAppClient> = {}): WhatsAppClient {
     forwardMessage: vi.fn(async () => ({ messageId: 'x' }) as SendResult),
     sendSticker: vi.fn(async () => ({ messageId: 'x' }) as SendResult),
     onIncomingDm: vi.fn(),
+    onReaction: vi.fn(),
     ...partial,
   };
 }

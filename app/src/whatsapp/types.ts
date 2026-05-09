@@ -28,6 +28,18 @@ export interface IncomingDm {
 
 export type IncomingDmHandler = (dm: IncomingDm) => void | Promise<void>;
 
+export interface ReactionEvent {
+  /** Serialized id of the message that was reacted to. */
+  targetMessageId: string;
+  /** Emoji the user reacted with. Empty string on reaction removal. */
+  reaction: string;
+  /** The chat/group the reacted-to message lives in. */
+  chatId: string;
+  timestamp: number;
+}
+
+export type ReactionHandler = (ev: ReactionEvent) => void | Promise<void>;
+
 export interface WhatsAppClient {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -46,4 +58,5 @@ export interface WhatsAppClient {
   sendSticker(toChatId: string, messageId: string): Promise<SendResult>;
 
   onIncomingDm(handler: IncomingDmHandler): void;
+  onReaction(handler: ReactionHandler): void;
 }

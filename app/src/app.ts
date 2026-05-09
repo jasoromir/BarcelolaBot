@@ -11,6 +11,7 @@ import type { WixClient } from './wix/types.js';
 import type { DirectMessageSender } from './messaging/directMessage.js';
 import type { AppLogger } from './log/logger.js';
 import type { RemindersStore, ReplyAuditStore } from './persistence/reminders.js';
+import type { WorkerForwardsStore } from './persistence/workerForwards.js';
 import type { ReminderRunner } from './reminders/runner.js';
 import type { Classifier } from './reminders/classifier.js';
 import type { IncomingDm } from './whatsapp/types.js';
@@ -28,6 +29,7 @@ export interface App {
   controlState: ControlStateService;
   reminders: RemindersStore;
   replyAudit: ReplyAuditStore;
+  workerForwards: WorkerForwardsStore;
 
   whatsapp: WhatsAppClient;
   wix: WixClient;

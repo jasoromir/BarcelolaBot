@@ -97,6 +97,7 @@ export interface WorkerForwardInput {
   reminder: ReminderRow;
   templates: TemplatesConfig;
   message: string;
+  suggestedReply: string | null;
 }
 
 export function buildWorkerForward(input: WorkerForwardInput): string {
@@ -107,6 +108,7 @@ export function buildWorkerForward(input: WorkerForwardInput): string {
     date: fmtDateDDMMYY(input.reminder.startAtIso),
     time: fmtTime(input.reminder.startAtIso),
     message: input.message,
+    suggested_reply: input.suggestedReply ?? '(לא נוצרה הצעה — טפלו ידנית)',
   });
 }
 

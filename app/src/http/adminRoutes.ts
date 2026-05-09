@@ -136,4 +136,197 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       res.status(400).json({ ok: false, error: (err as Error).message });
     }
   });
+
+  exp.get('/admin/api/chats/list', async (_req, res) => {
+    try {
+      const chats = await app.whatsapp.listChats();
+      res.json({ chats });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  exp.post('/admin/api/send-tomorrow-broadcast', async (req, res) => {
+    try {
+      const targetPhone = req.body.phone || '+34623964800';
+
+      // Fetch tomorrow's tours from Wix
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dateStr = tomorrow.toISOString().split('T')[0];
+
+      const tours = await app.wix.getToursForDate(dateStr);
+
+      if (tours.length === 0) {
+        res.json({ ok: true, message: 'No tours tomorrow', sent: false });
+        return;
+      }
+
+      // Build Hebrew message
+      const hebrewMessage = buildTomorrowMessage(tours, dateStr);
+
+      // Build guide info
+      const guideInfo = buildGuideAssignments(tours);
+
+      // Send main message
+      await app.whatsapp.sendDirect(targetPhone, hebrewMessage);
+
+      // Wait 2s
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Send guide assignments
+      await app.whatsapp.sendDirect(targetPhone, guideInfo);
+
+      res.json({
+        ok: true,
+        tourCount: tours.length,
+        totalParticipants: tours.reduce((sum, t) => sum + t.bookingCount, 0),
+        messagePreview: hebrewMessage.substring(0, 100),
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  function buildTomorrowMessage(tours: any[], date: string) {
+    const weekdays = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    const dateObj = new Date(date);
+    const weekday = weekdays[dateObj.getDay()];
+    const day = dateObj.getDate();
+    const month = dateObj.getMonth() + 1;
+
+    let msg = '*לילה טוב לכל המטיילים והמטיילות האהובים מ- Barcelola Tours ✨🌜*\n\n';
+    msg += `❤️ *לנמצאים בברצלונה - הצטרפו לסיורי ברצלולה, מחר יום ${weekday} ה-${day}.${month}* ❤️\n\n`;
+    msg += '*סיורים חינם על בסיס טיפ בתוך העיר*\n\n';
+
+    for (const tour of tours) {
+      const info = getTourDescription(tour.serviceId || '', tour.title || '');
+      msg += `${info.emoji} ${tour.startTime || ''}-${tour.endTime || ''}\n`;
+      msg += `*${info.nameHe}*\n`;
+      msg += `${info.descriptionHe}\n`;
+      msg += `*נקודת ושעת מפגש* - ${info.meetingPoint}\n\n`;
+    }
+
+    msg += '🌻 *למידע נוסף והרשמה לסיורים הכנסו לאתר שלנו:*\n';
+    msg += 'https://www.barcelola-tours.com/barcelolatours\n\n';
+    msg += '🌻בואו גם ל *קבוצת הפייסבוק* שלנו!\n';
+    msg += 'https://www.facebook.com/groups/barcelolatours/?ref=share';
+
+    return msg;
+  }
+
+  function buildGuideAssignments(tours: any[]) {
+    let msg = '*הדרכות למחר:*\n\n';
+
+    for (const tour of tours) {
+      const guideName = 'לא משובץ'; // Default - you can add guide assignment logic later
+      msg += `🌻 *${tour.tourTitle || tour.title || 'סיור'}* (${tour.startTime || ''})\n`;
+      msg += `מדריך/ה: ${guideName}\n`;
+      msg += `מספר משתתפים: ${tour.bookingCount || 0}\n\n`;
+    }
+
+    return msg;
+  }
+
+  function getTourDescription(serviceId: string, title: string) {
+    const tourDescriptions: Record<string, any> = {
+      '4422ee5f-957b-45c8-bf06-876482fd2b57': {
+        emoji: '🌻',
+        nameHe: 'גותיראמבלה ללא הפסקה',
+        descriptionHe: 'בסיור נלמד ונכיר את הקטלאני המפורסם מכולם - אנטוני גאודי. נראה את הבתים המפורסמים שלו, נבין מה הופך אותו לאדריכל כל כך ייחודי ונגלה סיפורים מרתקים על חייו.',
+        meetingPoint: '10:15 בכניסה למסעדת הארד רוק קפה, פלאסה קטלוניה',
+      },
+      '83faaa08-7ce3-4cf5-8743-637f2b92371b': {
+        emoji: '⚽',
+        nameHe: 'בארסהלולה',
+        descriptionHe: 'סיור מרתק לאצטדיון בארסה, נכיר את ההיסטוריה של המועדון המפורסם ונבקר במוזיאון הכי עשיר בטרופיים בעולם!',
+        meetingPoint: '10:00 בכניסה למסעדת הארד רוק קפה, פלאסה קטלוניה',
+      },
+      'abccdd90-4eae-4b1b-8f37-401a69236973': {
+        emoji: '✡️',
+        nameHe: 'היהודים באים',
+        descriptionHe: 'נלמד על ההיסטוריה היהודית המרתקת של ברצלונה, נבקר בשכונה היהודית העתיקה ונגלה סיפורים מרגשים על הקהילה היהודית.',
+        meetingPoint: '15:00 ליד תיאטרון Apolo, צמוד לתחנת המטרו Paral·lel',
+      },
+    };
+
+    return tourDescriptions[serviceId] || {
+      emoji: '🌻',
+      nameHe: title,
+      descriptionHe: `סיור מיוחד בברצלונה - ${title}. הצטרפו אלינו לחוויה בלתי נשכחת!`,
+      meetingPoint: 'נקודת המפגש תישלח בהודעה נפרדת',
+    };
+  }
+
+  exp.get('/admin/api/messages/analyze', async (_req, res) => {
+    try {
+      const groupId = '120363425214664727@g.us'; // Barcelola BOT
+      const messages = await app.whatsapp.getMessages(groupId, 1000);
+      const sorted = messages.sort((a, b) => a.timestamp - b.timestamp);
+
+      // Analyze all messages
+      const analysis = sorted.map((msg, idx) => ({
+        index: idx,
+        timestamp: msg.timestamp,
+        type: msg.type,
+        hasMedia: msg.hasMedia,
+        bodyLength: msg.body?.length || 0,
+        bodyPreview: msg.body?.substring(0, 100) || '(no text)',
+      }));
+
+      res.json({ total: analysis.length, messages: analysis });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  exp.post('/admin/api/messages/send-first-two', async (req, res) => {
+    try {
+      const groupId = '120363425214664727@g.us'; // Barcelola BOT
+      const targetPhone = req.body.phone || '+34675319188';
+
+      // Get messages and sort by timestamp
+      const messages = await app.whatsapp.getMessages(groupId, 1000);
+      const sorted = messages.sort((a, b) => a.timestamp - b.timestamp);
+
+      // Filter out system messages - find first real text message
+      const firstText = sorted.find(msg => msg.type === 'chat' && msg.body && msg.body.length > 50);
+      // Find first sticker
+      const firstSticker = sorted.find(msg => msg.type === 'sticker');
+
+      if (!firstText || !firstSticker) {
+        res.status(400).json({
+          error: 'Could not find required messages',
+          foundText: !!firstText,
+          foundSticker: !!firstSticker
+        });
+        return;
+      }
+
+      const results = [];
+
+      // Send first text message
+      console.log('Sending first Hebrew message:', firstText.body?.substring(0, 100));
+      await app.whatsapp.sendDirect(targetPhone, firstText.body);
+      results.push({ message: 1, type: 'text', length: firstText.body.length, sent: true });
+
+      // Wait 2s
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Send sticker - download and re-send
+      console.log('Sending first sticker');
+      const targetChatId = targetPhone.replace(/^\+/, '') + '@c.us';
+      await app.whatsapp.sendSticker(targetChatId, firstSticker.id);
+      results.push({ message: 2, type: 'sticker', sent: true });
+
+      res.json({
+        ok: true,
+        results,
+        firstText: { bodyPreview: firstText.body?.substring(0, 100), length: firstText.body?.length },
+        firstSticker: { type: firstSticker.type }
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
 }

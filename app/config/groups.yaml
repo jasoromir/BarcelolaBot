@@ -1,6 +1,23 @@
 # Broadcast groups. Bot must be admin of each.
-# User will replace with real group IDs during initial setup.
+# Testing with Barcelola BOT group first, then add the 5 traveler groups later
 groups:
-  - id: "120363099999999999@g.us"
-    name: "Test Group (placeholder)"
-    active: false
+  - id: "120363425214664727@g.us"
+    name: "Barcelola BOT🌻"
+    active: true
+
+  # Production groups (disabled for now - need admin permissions):
+  # - id: "34651886491-1583845723@g.us"
+  #   name: "🌻1 מטיילים עם ברצלולה 1🌻"
+  #   active: false
+  # - id: "34651886491-1631796027@g.us"
+  #   name: "🌻 2 מטיילים עם ברצלולה 2🌻"
+  #   active: false
+  # - id: "34651886491-1612004982@g.us"
+  #   name: "🌻3מטיילים עם ברצלולה3🌻"
+  #   active: false
+  # - id: "34651886491-1581073979@g.us"
+  #   name: "🌻4מטיילים עם ברצלולה4🌻"
+  #   active: false
+  # - id: "34651886491-1613062135@g.us"
+  #   name: "🌻5מטיילים עם ברצלולה5🌻"
+  #   active: false

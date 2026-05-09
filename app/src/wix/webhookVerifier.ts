@@ -5,6 +5,7 @@ const BookingWebhookSchema = z.object({
   data: z.object({
     booking: z.object({
       id: z.string().min(1),
+      totalParticipants: z.number().optional(),
       bookedEntity: z.object({
         serviceId: z.string().min(1),
         title: z.string().optional(),
@@ -20,6 +21,9 @@ const BookingWebhookSchema = z.object({
           email: z.string().optional(),
           phone: z.string().min(1),
         }),
+        paymentSelection: z.array(z.object({
+          numberOfParticipants: z.number().optional(),
+        })).optional(),
       }),
     }),
   }),
@@ -59,15 +63,24 @@ export function parseBookingWebhook(payload: unknown): ParseResult {
   const cd = b.formInfo.contactDetails;
   const first = cd.firstName ?? '';
   const last = cd.lastName ?? '';
+
+  // Get participant count from multiple possible sources
+  let participantCount = b.totalParticipants;
+  if (!participantCount && b.formInfo.paymentSelection && b.formInfo.paymentSelection.length > 0) {
+    participantCount = b.formInfo.paymentSelection[0]?.numberOfParticipants;
+  }
+
   return {
     ok: true,
     event: {
       bookingId: b.id,
       tourId: b.bookedEntity.serviceId,
+      tourTitle: b.bookedEntity.title,
       phone: cd.phone,
       clientName: [first, last].filter(Boolean).join(' ').trim() || (cd.email ?? 'Guest'),
       date: fmtDate(b.bookedEntity.singleSession.start),
       time: fmtTime(b.bookedEntity.singleSession.start),
+      participantCount: participantCount || 1,
     },
   };
 }

@@ -24,7 +24,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: opts.sessionDir }),
     puppeteer: {
-      headless: true,
+      headless: true,  // Back to headless - works fine with personal account
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     },
   });
@@ -69,6 +69,60 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       .setMessagesAdminsOnly(adminsOnly);
   }
 
+  async function listChats() {
+    const chats = await client.getChats();
+    const selfId = client.info?.wid?._serialized;
+    const result = [];
+
+    for (const chat of chats) {
+      const isGroup = chat.isGroup;
+      let isAdmin = false;
+
+      if (isGroup && selfId) {
+        const participants = (chat as unknown as { participants?: Array<{ id: { _serialized: string }; isAdmin: boolean }> })
+          .participants ?? [];
+        isAdmin = participants.some((p) => p.id._serialized === selfId && p.isAdmin);
+      }
+
+      result.push({
+        id: chat.id._serialized,
+        name: chat.name || 'Unknown',
+        isGroup,
+        isAdmin: isGroup ? isAdmin : undefined,
+      });
+    }
+
+    return result;
+  }
+
+  async function getMessages(chatId: string, limit: number) {
+    const chat = await client.getChatById(chatId);
+    const messages = await chat.fetchMessages({ limit });
+
+    return messages.map((msg: any) => ({
+      id: msg.id._serialized,
+      body: msg.body || '',
+      type: msg.type,
+      timestamp: msg.timestamp,
+      hasMedia: msg.hasMedia,
+    }));
+  }
+
+  async function forwardMessage(messageId: string, toChatId: string) {
+    const msg = await client.getMessageById(messageId);
+    await msg.forward(toChatId);
+    return { messageId: messageId };
+  }
+
+  async function sendSticker(toChatId: string, messageId: string) {
+    const msg = await client.getMessageById(messageId);
+    if (msg.hasMedia) {
+      const media = await msg.downloadMedia();
+      await client.sendMessage(toChatId, media, { sendMediaAsSticker: true });
+    }
+    return { messageId: messageId };
+  }
+
   return {
     async start(): Promise<void> {
       if (current.kind === 'connected' || current.kind === 'qr_pending') return;
@@ -84,5 +138,9 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     sendDirect,
     isGroupAdmin,
     setGroupMessagesAdminsOnly,
+    listChats,
+    getMessages,
+    forwardMessage,
+    sendSticker,
   };
 }

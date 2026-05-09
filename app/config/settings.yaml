@@ -4,7 +4,7 @@ schedule:
   morning_cron: "30 8 * * *"
 broadcast:
   mode: "test"
-  test_group_id: "120363099999999999@g.us"
+  test_group_id: "120363425214664727@g.us"  # Barcelola BOT🌻 - our testing group
   inter_message_delay_ms: 2000
 min_bookings_to_run: 1
 retry:

@@ -25,10 +25,12 @@ export interface Tour {
 export interface BookingEvent {
   bookingId: string;
   tourId: string;
+  tourTitle?: string; // from Wix bookedEntity.title, fallback when not in tours.yaml
   date: ISODateString;
   time: string; // "HH:mm"
   clientName: string;
   phone: string; // as received from Wix (not yet normalized)
+  participantCount?: number;
 }
 
 export interface GroupRef {

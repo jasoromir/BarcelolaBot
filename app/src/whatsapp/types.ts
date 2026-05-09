@@ -4,6 +4,21 @@ export interface SendResult {
   messageId: string;
 }
 
+export interface ChatInfo {
+  id: string;
+  name: string;
+  isGroup: boolean;
+  isAdmin?: boolean;
+}
+
+export interface MessageInfo {
+  id: string;
+  body: string;
+  type: string;
+  timestamp: number;
+  hasMedia: boolean;
+}
+
 export interface WhatsAppClient {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -15,4 +30,9 @@ export interface WhatsAppClient {
 
   isGroupAdmin(groupId: string): Promise<boolean>;
   setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
+
+  listChats(): Promise<ChatInfo[]>;
+  getMessages(chatId: string, limit: number): Promise<MessageInfo[]>;
+  forwardMessage(messageId: string, toChatId: string): Promise<SendResult>;
+  sendSticker(toChatId: string, messageId: string): Promise<SendResult>;
 }

@@ -52,11 +52,18 @@ export interface BookingConfirmationInput {
 
 export function buildBookingConfirmation(input: BookingConfirmationInput): string {
   const cfg = input.toursConfig.tours[input.event.tourId];
-  const tourName = cfg?.name_he ?? input.event.tourId;
+  // Prefer configured Hebrew name, fallback to Wix title, then generic
+  const tourName = cfg?.name_he ?? input.event.tourTitle ?? 'הסיור';
+
+  // Format date as DD/MM/YY
+  const [year, month, day] = input.event.date.split('-');
+  const formattedDate = `${day}/${month}/${year?.slice(2)}`;
+
   return interpolate(input.templates.booking_confirmation, {
     client_name: input.event.clientName,
     tour_name_he: tourName,
-    date: input.event.date,
+    date: formattedDate,
     time: input.event.time,
+    participant_count: String(input.event.participantCount || 1),
   });
 }

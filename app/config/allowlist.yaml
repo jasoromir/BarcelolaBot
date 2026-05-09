@@ -1,4 +1,7 @@
 mode: "explicit"
-explicit_phones: []
+explicit_phones:
+  - "+34675319188"  # Primary contact
+  - "+34651886491"  # Secondary contact
+  - "+34623964800"  # Test number
 rule:
   country_codes: []

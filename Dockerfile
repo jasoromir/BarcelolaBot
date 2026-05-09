@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxdamage1 \
       libxrandr2 \
       libgbm1 \
-      libasound2t64 \
+      libasound2 \
       libpango-1.0-0 \
       libcairo2 \
       libcups2 \

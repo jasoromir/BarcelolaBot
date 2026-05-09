@@ -273,12 +273,14 @@ export function createWixClient(opts: WixClientOpts): WixClient {
             body: JSON.stringify({
               revision,
               participantNotification: { notifyParticipants: false },
+              // Wix uses "ignoreCancellationPolicy" / "withRefund" /
+              // "waiveCancellationFee" here (skip* names don't exist — those
+              // silently had no effect, which is why the 72h policy kept
+              // rejecting us with 428 BOOKING_POLICY_VIOLATION).
               flowControlSettings: {
-                skipCancellationPolicyCheck: true,
-                skipRefund: true,
-                skipBusinessNotification: false,
+                ignoreCancellationPolicy: true,
+                waiveCancellationFee: true,
               },
-              // Act as BUSINESS so Wix honors skipCancellationPolicyCheck.
               initiator: 'BUSINESS',
               reason: input.reason,
             }),

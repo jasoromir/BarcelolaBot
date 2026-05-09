@@ -120,41 +120,47 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     } else {
       try {
         const contact: any = await msg.getContact();
+        // Priority: jid-style fields first (these hold the real E.164 for
+        // @lid contacts), then raw strings, then contact.number as a last
+        // resort. For LID contacts `contact.number` is the LID itself (e.g.
+        // 221616084627681), which we must reject — real phone numbers arrive
+        // in `contact.id._serialized` / `contact.id.user` as the @c.us jid.
         const candidates: Array<[string, unknown]> = [
-          ['contact.number', contact?.number],
-          ['contact.id.user', contact?.id?.user],
           ['contact.id._serialized', contact?.id?._serialized],
-          ['contact.pushname', contact?.pushname],
+          ['msg._data.senderObj.id._serialized', (msg as any)._data?.senderObj?.id?._serialized],
+          ['msg._data.sender.id._serialized', (msg as any)._data?.sender?.id?._serialized],
           ['msg.author', (msg as any).author],
           ['msg._data.author', (msg as any)._data?.author],
           ['msg._data.from', (msg as any)._data?.from],
-          ['msg._data.senderObj.id._serialized', (msg as any)._data?.senderObj?.id?._serialized],
-          ['msg._data.sender.id._serialized', (msg as any)._data?.sender?.id?._serialized],
-          ['msg._data.notifyName', (msg as any)._data?.notifyName],
+          ['contact.id.user', contact?.id?.user],
+          ['contact.number', contact?.number],
         ];
         console.log(
           `[wa:${eventName}] lid resolution candidates: ${JSON.stringify(
             candidates.map(([k, v]) => [k, v]),
           )}`,
         );
-        // Pick the first candidate that looks like a phone number jid or raw
-        // E.164 digits. LID ids are ~15 digits starting with 1200 — reject
-        // those; real phone numbers are 8-15 digits and don't start with that
-        // pattern.
         const looksLikePhone = (s: string) => /^\d{8,15}$/.test(s) && !s.startsWith('1200');
-        for (const [, raw] of candidates) {
+        for (const [key, raw] of candidates) {
           if (typeof raw !== 'string' || !raw) continue;
-          // Accept jid@c.us; reject jid@lid; accept raw digits.
           if (raw.endsWith('@lid')) continue;
           if (raw.endsWith('@c.us')) {
             const digits = raw.replace(/@c\.us$/, '');
             if (looksLikePhone(digits)) {
               fromPhoneE164 = `+${digits}`;
+              console.log(`[wa:${eventName}] resolved phone via ${key} = ${fromPhoneE164}`);
               break;
             }
           } else if (looksLikePhone(raw)) {
-            fromPhoneE164 = `+${raw}`;
-            break;
+            // Only accept bare-digit fields if their key is known-safe.
+            // `contact.id.user` is safe (always the E.164 for @c.us-backed
+            // contacts). `contact.number` is NOT safe — for @lid contacts it
+            // returns the LID. Everything else we skip.
+            if (key === 'contact.id.user') {
+              fromPhoneE164 = `+${raw}`;
+              console.log(`[wa:${eventName}] resolved phone via ${key} = ${fromPhoneE164}`);
+              break;
+            }
           }
         }
       } catch (err) {

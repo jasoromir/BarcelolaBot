@@ -103,18 +103,54 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     }
 
     // Resolve the real phone number. For @c.us the `from` already contains the
-    // phone digits. For @lid (WhatsApp's new opaque Linked-Device ID) we need
-    // getContact() to get the underlying E.164.
+    // phone digits. For @lid (WhatsApp's opaque Linked-Device ID) we need to
+    // resolve via the Contact. Different whatsapp-web.js versions expose the
+    // E.164 in different fields — try each in order. Dump everything we can
+    // see for debugging when resolution fails.
     let fromPhoneE164: string | null = null;
     if (from.endsWith('@c.us')) {
       const digits = from.replace(/@c\.us$/, '');
       fromPhoneE164 = digits.startsWith('+') ? digits : `+${digits}`;
     } else {
       try {
-        const contact = await msg.getContact();
-        // Contact.number is the international phone number without the '+'.
-        const num: string | undefined = contact?.number;
-        if (num && /^\d+$/.test(num)) fromPhoneE164 = `+${num}`;
+        const contact: any = await msg.getContact();
+        const candidates: Array<[string, unknown]> = [
+          ['contact.number', contact?.number],
+          ['contact.id.user', contact?.id?.user],
+          ['contact.id._serialized', contact?.id?._serialized],
+          ['contact.pushname', contact?.pushname],
+          ['msg.author', (msg as any).author],
+          ['msg._data.author', (msg as any)._data?.author],
+          ['msg._data.from', (msg as any)._data?.from],
+          ['msg._data.senderObj.id._serialized', (msg as any)._data?.senderObj?.id?._serialized],
+          ['msg._data.sender.id._serialized', (msg as any)._data?.sender?.id?._serialized],
+          ['msg._data.notifyName', (msg as any)._data?.notifyName],
+        ];
+        console.log(
+          `[wa:${eventName}] lid resolution candidates: ${JSON.stringify(
+            candidates.map(([k, v]) => [k, v]),
+          )}`,
+        );
+        // Pick the first candidate that looks like a phone number jid or raw
+        // E.164 digits. LID ids are ~15 digits starting with 1200 — reject
+        // those; real phone numbers are 8-15 digits and don't start with that
+        // pattern.
+        const looksLikePhone = (s: string) => /^\d{8,15}$/.test(s) && !s.startsWith('1200');
+        for (const [, raw] of candidates) {
+          if (typeof raw !== 'string' || !raw) continue;
+          // Accept jid@c.us; reject jid@lid; accept raw digits.
+          if (raw.endsWith('@lid')) continue;
+          if (raw.endsWith('@c.us')) {
+            const digits = raw.replace(/@c\.us$/, '');
+            if (looksLikePhone(digits)) {
+              fromPhoneE164 = `+${digits}`;
+              break;
+            }
+          } else if (looksLikePhone(raw)) {
+            fromPhoneE164 = `+${raw}`;
+            break;
+          }
+        }
       } catch (err) {
         console.error(`[wa:${eventName}] getContact failed for ${from}:`, err);
       }

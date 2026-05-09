@@ -27,10 +27,16 @@ export interface HandleInput {
 export async function handleBookingWebhook(input: HandleInput): Promise<HandlerOutcome> {
   const parsed = parseBookingWebhook(input.payload);
   if (!parsed.ok) {
+    let rawSample = '';
+    try {
+      rawSample = JSON.stringify(input.payload).slice(0, 2000);
+    } catch {
+      rawSample = '<unserializable>';
+    }
     input.logger.warn({
       source: 'webhook',
       eventType: 'booking_invalid',
-      message: parsed.error,
+      message: `${parsed.error}; raw=${rawSample}`,
     });
     return { outcome: 'invalid', error: parsed.error };
   }

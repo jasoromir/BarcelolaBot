@@ -29,7 +29,7 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
   if (!parsed.ok) {
     let rawSample = '';
     try {
-      rawSample = JSON.stringify(input.payload).slice(0, 2000);
+      rawSample = JSON.stringify(input.payload).slice(0, 10000);
     } catch {
       rawSample = '<unserializable>';
     }

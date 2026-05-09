@@ -297,7 +297,14 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
         `sendSticker: source message has no media (type=${msg.type}, id=${messageId})`,
       );
     }
-    const media = await msg.downloadMedia();
+    console.log(`[wa:sendSticker] calling downloadMedia...`);
+    const downloadTimeoutMs = 30_000;
+    const media: any = await Promise.race([
+      msg.downloadMedia(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`downloadMedia timeout after ${downloadTimeoutMs}ms`)), downloadTimeoutMs),
+      ),
+    ]);
     if (!media) {
       throw new Error(`sendSticker: downloadMedia returned null for ${messageId}`);
     }

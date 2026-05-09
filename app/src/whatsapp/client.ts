@@ -80,7 +80,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   client.on('auth_failure', () => setState({ kind: 'disconnected' }));
 
   const seenMessageIds = new Set<string>();
-  const handleMessageEvent = (msg: any, eventName: string) => {
+  const handleMessageEvent = async (msg: any, eventName: string) => {
     const from: string = msg?.from ?? '';
     const fromMe = Boolean(msg?.fromMe);
     const bodyLen = typeof msg?.body === 'string' ? msg.body.length : 0;
@@ -89,19 +89,41 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       `[wa:${eventName}] id=${serialized} from=${from} fromMe=${fromMe} bodyLen=${bodyLen} type=${msg?.type}`,
     );
     if (fromMe) return;
-    if (!from.endsWith('@c.us')) return;
+    // Accept both classic @c.us (phone-addressed) and @lid (LID-addressed) DMs.
+    // Groups end in @g.us and are ignored. Anything else we also skip.
+    if (!(from.endsWith('@c.us') || from.endsWith('@lid'))) return;
     if (typeof msg.body !== 'string' || msg.body.length === 0) return;
     if (serialized && seenMessageIds.has(serialized)) return;
     if (serialized) {
       seenMessageIds.add(serialized);
-      // trim to prevent unbounded growth
       if (seenMessageIds.size > 500) {
         const first = seenMessageIds.values().next().value;
         if (first) seenMessageIds.delete(first);
       }
     }
-    const digits = from.replace(/@c\.us$/, '');
-    const fromPhoneE164 = digits.startsWith('+') ? digits : `+${digits}`;
+
+    // Resolve the real phone number. For @c.us the `from` already contains the
+    // phone digits. For @lid (WhatsApp's new opaque Linked-Device ID) we need
+    // getContact() to get the underlying E.164.
+    let fromPhoneE164: string | null = null;
+    if (from.endsWith('@c.us')) {
+      const digits = from.replace(/@c\.us$/, '');
+      fromPhoneE164 = digits.startsWith('+') ? digits : `+${digits}`;
+    } else {
+      try {
+        const contact = await msg.getContact();
+        // Contact.number is the international phone number without the '+'.
+        const num: string | undefined = contact?.number;
+        if (num && /^\d+$/.test(num)) fromPhoneE164 = `+${num}`;
+      } catch (err) {
+        console.error(`[wa:${eventName}] getContact failed for ${from}:`, err);
+      }
+    }
+    if (!fromPhoneE164) {
+      console.log(`[wa:${eventName}] could not resolve phone for from=${from}`);
+      return;
+    }
+
     const dm = {
       messageId: serialized,
       fromPhoneE164,
@@ -114,8 +136,16 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       });
     }
   };
-  client.on('message', (msg: any) => handleMessageEvent(msg, 'message'));
-  client.on('message_create', (msg: any) => handleMessageEvent(msg, 'message_create'));
+  client.on('message', (msg: any) => {
+    handleMessageEvent(msg, 'message').catch((err) =>
+      console.error('[wa:message] unhandled', err),
+    );
+  });
+  client.on('message_create', (msg: any) => {
+    handleMessageEvent(msg, 'message_create').catch((err) =>
+      console.error('[wa:message_create] unhandled', err),
+    );
+  });
 
   async function sendToGroup(groupId: string, body: string): Promise<SendResult> {
     const msg = await client.sendMessage(groupId, body);

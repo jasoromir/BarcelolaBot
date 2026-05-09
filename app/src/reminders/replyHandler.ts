@@ -240,18 +240,58 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       return;
     }
 
+    // Push the count change to Wix so the guide's calendar reflects reality.
+    // We sync on every count change (first confirm or subsequent update).
+    let wixUpdateNote: string | null = null;
+    if (countChanged) {
+      try {
+        const upd = await deps.wix.updateNumberOfParticipants({
+          bookingId: reminder.bookingId,
+          totalParticipants: newCount,
+        });
+        if (!upd.ok) {
+          wixUpdateNote = `wix_update_failed: ${upd.error ?? 'unknown'}`;
+          deps.logger.error({
+            source: 'reply',
+            eventType: 'wix_update_participants_failed',
+            message: wixUpdateNote,
+            metadata: { bookingId: reminder.bookingId },
+          });
+        } else {
+          deps.logger.info({
+            source: 'reply',
+            eventType: 'wix_update_participants',
+            message: `wix count -> ${newCount}${upd.unchanged ? ' (unchanged)' : ''}`,
+            metadata: { bookingId: reminder.bookingId },
+          });
+        }
+      } catch (err) {
+        wixUpdateNote = `wix_update_failed: ${(err as Error).message}`;
+        deps.logger.error({
+          source: 'reply',
+          eventType: 'wix_update_participants_failed',
+          message: wixUpdateNote,
+          metadata: { bookingId: reminder.bookingId },
+        });
+      }
+    }
+
     deps.reminders.setStatus(reminder.bookingId, 'confirmed', {
       participantCount: newCount,
       lastReplyTs: nowIso,
     });
+    // Shorter "updated" ack when the customer is changing a count they
+    // already confirmed. First confirm always gets the full ack with
+    // meeting point + map.
     const ack = buildConfirmationAck({
       reminder: { ...reminder, participantCount: newCount },
       templates: deps.config.templates,
       tours: deps.config.tours,
       officialContactNumber: deps.settings.officialContactNumber,
       defaultGoogleMapsUrl: deps.settings.defaultGoogleMapsUrl,
+      isUpdate: wasAlreadyConfirmed,
     });
-    await safeSend(deps, reminder.phone, ack, 'confirmation_ack');
+    await safeSend(deps, reminder.phone, ack, wasAlreadyConfirmed ? 'confirmation_update_ack' : 'confirmation_ack');
     deps.audit.record({
       ts: nowIso,
       phone,
@@ -261,12 +301,12 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       participantCount: cls.participantCount,
       confidence: cls.confidence,
       forwarded: false,
-      notes: wasAlreadyConfirmed ? 'count_changed' : null,
+      notes: wixUpdateNote ?? (wasAlreadyConfirmed ? 'count_changed' : null),
     });
     deps.logger.info({
       source: 'reply',
-      eventType: 'booking_confirmed',
-      message: `confirmed ${reminder.bookingId} count=${newCount}`,
+      eventType: wasAlreadyConfirmed ? 'booking_count_updated' : 'booking_confirmed',
+      message: `${wasAlreadyConfirmed ? 'updated' : 'confirmed'} ${reminder.bookingId} count=${newCount}`,
     });
   }
 

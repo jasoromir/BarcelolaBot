@@ -38,6 +38,7 @@ export const TemplatesConfigSchema = z.object({
   booking_confirmation_lt24h: z.string().min(1),
   reminder_24h: z.string().min(1),
   confirmation_ack: z.string().min(1),
+  confirmation_update_ack: z.string().min(1),
   cancel_ack: z.string().min(1),
   anti_reply_footer: z.string().min(1),
   no_reply_alert: z.string().min(1),

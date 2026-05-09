@@ -13,7 +13,21 @@ export interface CancelBookingResult {
   error?: string;
 }
 
+export interface UpdateParticipantsInput {
+  bookingId: string;
+  totalParticipants: number;
+}
+
+export interface UpdateParticipantsResult {
+  ok: boolean;
+  unchanged?: boolean;
+  error?: string;
+}
+
 export interface WixClient {
   getToursForDate(date: string): Promise<Tour[]>;
   cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult>;
+  updateNumberOfParticipants(
+    input: UpdateParticipantsInput,
+  ): Promise<UpdateParticipantsResult>;
 }

@@ -26,6 +26,7 @@ const templates: TemplatesConfig = {
     'COMBINED {client_name} / {tour_name_he} / {date} {time} / {participant_count} / {anti_reply_footer}',
   reminder_24h: 'R24 {client_name}',
   confirmation_ack: 'ACK {client_name}',
+  confirmation_update_ack: 'UPD {client_name} {participant_count}',
   cancel_ack: 'CANCEL {client_name}',
   anti_reply_footer: 'FOOTER({official_contact_number})',
   no_reply_alert: 'NORE {tour_name_he}',

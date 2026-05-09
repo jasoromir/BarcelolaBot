@@ -77,6 +77,11 @@ confirmation_ack: |
 
   🌻 חפשו את המדריך/ה שלנו עם חמנייה!
 
+confirmation_update_ack: |
+  עודכן! 🌻
+  ההזמנה שלכם ל-*{tour_name_he}* מעודכנת כעת ל-*{participant_count} משתתפים* ✅
+  נתראה מחר! 🎉
+
 cancel_ack: |
   ביטול התקבל 🌻
   חבל שלא תוכלו להצטרף הפעם, {client_name}.

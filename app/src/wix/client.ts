@@ -2,6 +2,8 @@ import type { Tour } from '../types.js';
 import type {
   CancelBookingInput,
   CancelBookingResult,
+  UpdateParticipantsInput,
+  UpdateParticipantsResult,
   WixClient,
 } from './types.js';
 
@@ -122,6 +124,47 @@ export function createWixClient(opts: WixClientOpts): WixClient {
     }
   }
 
+  interface BookingSnapshot {
+    ok: true;
+    booking: { revision?: string; status?: string; totalParticipants?: number } | null;
+  }
+  interface BookingSnapshotErr {
+    ok: false;
+    error: string;
+  }
+  async function fetchBookingSnapshot(
+    bookingId: string,
+    signal: AbortSignal,
+  ): Promise<BookingSnapshot | BookingSnapshotErr> {
+    try {
+      const res = await fetchFn(`${base}/_api/bookings-reader/v2/extended-bookings/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: opts.apiKey,
+          'wix-site-id': opts.siteId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: { filter: { id: bookingId }, cursorPaging: { limit: 1 } },
+        }),
+        signal,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        return { ok: false, error: `snapshot failed ${res.status}: ${text.slice(0, 300)}` };
+      }
+      const data = (await res.json()) as {
+        extendedBookings?: Array<{
+          booking?: { revision?: string; status?: string; totalParticipants?: number };
+        }>;
+      };
+      const first = data.extendedBookings?.[0]?.booking;
+      return { ok: true, booking: first ?? null };
+    } catch (err) {
+      return { ok: false, error: `snapshot failed: ${(err as Error).message}` };
+    }
+  }
+
   return {
     async getToursForDate(date: string): Promise<Tour[]> {
       // Fetch bookings from start-of-local-date onward; stop once we cross end-of-local-date.
@@ -215,51 +258,14 @@ export function createWixClient(opts: WixClientOpts): WixClient {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        // Wix requires the current booking revision for the cancel call.
-        // There is no direct GET-by-id endpoint — we have to query by filter
-        // and read the revision out of the first result.
-        let revision: string | undefined;
-        try {
-          const qRes = await fetchFn(
-            `${base}/_api/bookings-reader/v2/extended-bookings/query`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: opts.apiKey,
-                'wix-site-id': opts.siteId,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                query: { filter: { id: input.bookingId }, cursorPaging: { limit: 1 } },
-              }),
-              signal: controller.signal,
-            },
-          );
-          if (!qRes.ok) {
-            const text = await qRes.text();
-            return {
-              ok: false,
-              error: `get-for-revision failed ${qRes.status}: ${text.slice(0, 300)}`,
-            };
-          }
-          const data = (await qRes.json()) as {
-            extendedBookings?: Array<{ booking?: { revision?: string; status?: string } }>;
-          };
-          const first = data.extendedBookings?.[0]?.booking;
-          if (!first) {
-            // Not found in reader query → genuinely gone; treat as already cancelled.
-            return { ok: true, alreadyCancelled: true };
-          }
-          if (first.status === 'CANCELED' || first.status === 'CANCELLED') {
-            return { ok: true, alreadyCancelled: true };
-          }
-          revision = first.revision;
-        } catch (err) {
-          return { ok: false, error: `get-for-revision failed: ${(err as Error).message}` };
+        const snapshot = await fetchBookingSnapshot(input.bookingId, controller.signal);
+        if (!snapshot.ok) return { ok: false, error: snapshot.error };
+        if (!snapshot.booking) return { ok: true, alreadyCancelled: true };
+        if (snapshot.booking.status === 'CANCELED' || snapshot.booking.status === 'CANCELLED') {
+          return { ok: true, alreadyCancelled: true };
         }
-        if (!revision) {
-          return { ok: false, error: 'revision missing from Wix response' };
-        }
+        const revision = snapshot.booking.revision;
+        if (!revision) return { ok: false, error: 'revision missing from Wix response' };
 
         const res = await fetchFn(
           `${base}/bookings/v2/bookings/${encodeURIComponent(input.bookingId)}/cancel`,
@@ -295,6 +301,59 @@ export function createWixClient(opts: WixClientOpts): WixClient {
           return {
             ok: false,
             error: `cancel failed ${res.status}: ${text.slice(0, 300)}`,
+          };
+        }
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      } finally {
+        clearTimeout(t);
+      }
+    },
+
+    async updateNumberOfParticipants(
+      input: UpdateParticipantsInput,
+    ): Promise<UpdateParticipantsResult> {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const snapshot = await fetchBookingSnapshot(input.bookingId, controller.signal);
+        if (!snapshot.ok) return { ok: false, error: snapshot.error };
+        if (!snapshot.booking) return { ok: false, error: 'booking not found' };
+        if (snapshot.booking.status === 'CANCELED' || snapshot.booking.status === 'CANCELLED') {
+          return { ok: false, error: 'booking already cancelled' };
+        }
+        if (
+          typeof snapshot.booking.totalParticipants === 'number' &&
+          snapshot.booking.totalParticipants === input.totalParticipants
+        ) {
+          return { ok: true, unchanged: true };
+        }
+        const revision = snapshot.booking.revision;
+        if (!revision) return { ok: false, error: 'revision missing from Wix response' };
+
+        const res = await fetchFn(
+          `${base}/bookings/v2/bookings/${encodeURIComponent(input.bookingId)}/update_number_of_participants`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: opts.apiKey,
+              'wix-site-id': opts.siteId,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              revision,
+              totalParticipants: input.totalParticipants,
+              participantNotification: { notifyParticipants: false },
+            }),
+            signal: controller.signal,
+          },
+        );
+        if (!res.ok) {
+          const text = await res.text();
+          return {
+            ok: false,
+            error: `update-participants failed ${res.status}: ${text.slice(0, 300)}`,
           };
         }
         return { ok: true };

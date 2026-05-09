@@ -57,6 +57,7 @@ function fakeConfig(mode: 'open' | 'explicit' = 'open'): AppConfig {
       booking_confirmation_lt24h: 'HILT24 {client_name} {tour_name_he}',
       reminder_24h: 'R24 {client_name}',
       confirmation_ack: 'ACK {client_name}',
+      confirmation_update_ack: 'UPD {client_name} {participant_count}',
       cancel_ack: 'CX {client_name}',
       anti_reply_footer: 'FTR {official_contact_number}',
       no_reply_alert: 'NR {tour_name_he}',

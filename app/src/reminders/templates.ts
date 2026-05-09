@@ -58,6 +58,12 @@ export interface ConfirmationAckInput {
   tours: ToursConfig;
   officialContactNumber: string;
   defaultGoogleMapsUrl?: string;
+  /**
+   * True when the customer is updating a count on an already-confirmed booking.
+   * Renders a shorter "we updated your booking to N people" ack instead of
+   * repeating the full confirmation with meeting point + map.
+   */
+  isUpdate?: boolean;
 }
 
 export function buildConfirmationAck(input: ConfirmationAckInput): string {
@@ -65,6 +71,17 @@ export function buildConfirmationAck(input: ConfirmationAckInput): string {
     ? input.tours.tours[input.reminder.tourId]
     : undefined;
   const tourName = resolveTourName(input.reminder, input.tours);
+
+  if (input.isUpdate) {
+    return interpolate(input.templates.confirmation_update_ack, {
+      client_name: input.reminder.clientName ?? 'Guest',
+      tour_name_he: tourName,
+      date: fmtDateDDMMYY(input.reminder.startAtIso),
+      time: fmtTime(input.reminder.startAtIso),
+      participant_count: String(input.reminder.participantCount),
+    });
+  }
+
   const meetingPoint = tour?.meeting_point_he ?? '';
   const mapsUrl = tour?.google_maps_url ?? input.defaultGoogleMapsUrl;
   const mapsUrlLine = mapsUrl ? `📍 ${mapsUrl}` : '';

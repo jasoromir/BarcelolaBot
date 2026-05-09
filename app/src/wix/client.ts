@@ -215,33 +215,45 @@ export function createWixClient(opts: WixClientOpts): WixClient {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        // Wix requires the current booking revision for the cancel call, so
-        // fetch it first. 404 here → already gone; treat as alreadyCancelled.
+        // Wix requires the current booking revision for the cancel call.
+        // There is no direct GET-by-id endpoint — we have to query by filter
+        // and read the revision out of the first result.
         let revision: string | undefined;
         try {
-          const getRes = await fetchFn(
-            `${base}/_api/bookings-reader/v2/bookings/${encodeURIComponent(input.bookingId)}`,
+          const qRes = await fetchFn(
+            `${base}/_api/bookings-reader/v2/extended-bookings/query`,
             {
-              method: 'GET',
+              method: 'POST',
               headers: {
                 Authorization: opts.apiKey,
                 'wix-site-id': opts.siteId,
+                'Content-Type': 'application/json',
               },
+              body: JSON.stringify({
+                query: { filter: { id: input.bookingId }, cursorPaging: { limit: 1 } },
+              }),
               signal: controller.signal,
             },
           );
-          if (getRes.status === 404) {
-            return { ok: true, alreadyCancelled: true };
-          }
-          if (!getRes.ok) {
-            const text = await getRes.text();
+          if (!qRes.ok) {
+            const text = await qRes.text();
             return {
               ok: false,
-              error: `get-for-revision failed ${getRes.status}: ${text.slice(0, 300)}`,
+              error: `get-for-revision failed ${qRes.status}: ${text.slice(0, 300)}`,
             };
           }
-          const data = (await getRes.json()) as { booking?: { revision?: string } };
-          revision = data.booking?.revision;
+          const data = (await qRes.json()) as {
+            extendedBookings?: Array<{ booking?: { revision?: string; status?: string } }>;
+          };
+          const first = data.extendedBookings?.[0]?.booking;
+          if (!first) {
+            // Not found in reader query → genuinely gone; treat as already cancelled.
+            return { ok: true, alreadyCancelled: true };
+          }
+          if (first.status === 'CANCELED' || first.status === 'CANCELLED') {
+            return { ok: true, alreadyCancelled: true };
+          }
+          revision = first.revision;
         } catch (err) {
           return { ok: false, error: `get-for-revision failed: ${(err as Error).message}` };
         }

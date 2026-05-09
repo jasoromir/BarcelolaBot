@@ -56,6 +56,7 @@ export interface ConfirmationAckInput {
   templates: TemplatesConfig;
   tours: ToursConfig;
   officialContactNumber: string;
+  defaultGoogleMapsUrl?: string;
 }
 
 export function buildConfirmationAck(input: ConfirmationAckInput): string {
@@ -64,7 +65,8 @@ export function buildConfirmationAck(input: ConfirmationAckInput): string {
     : undefined;
   const tourName = resolveTourName(input.reminder, input.tours);
   const meetingPoint = tour?.meeting_point_he ?? '';
-  const mapsUrlLine = tour?.google_maps_url ? `📍 ${tour.google_maps_url}` : '';
+  const mapsUrl = tour?.google_maps_url ?? input.defaultGoogleMapsUrl;
+  const mapsUrlLine = mapsUrl ? `📍 ${mapsUrl}` : '';
   const footer = antiReplyFooter(input.templates.anti_reply_footer, input.officialContactNumber);
   return interpolate(input.templates.confirmation_ack, {
     client_name: input.reminder.clientName ?? 'Guest',

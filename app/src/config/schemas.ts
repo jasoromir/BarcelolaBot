@@ -79,6 +79,7 @@ export const SettingsConfigSchema = z.object({
     official_contact_number: PhoneSchema,
     worker_group_id: GroupIdSchema,
     classifier_confidence_threshold: z.number().min(0).max(1),
+    default_google_maps_url: z.string().url().optional(),
   }),
 });
 export type SettingsConfig = z.infer<typeof SettingsConfigSchema>;

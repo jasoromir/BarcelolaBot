@@ -19,3 +19,4 @@ reminders:
   official_contact_number: "+34623964800"
   worker_group_id: "120363425214664727@g.us"  # BARCELOLA BOT group
   classifier_confidence_threshold: 0.7
+  default_google_maps_url: "https://maps.app.goo.gl/3nbsJJytm6HnDGXL8"

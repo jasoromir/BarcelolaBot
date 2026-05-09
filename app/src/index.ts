@@ -164,6 +164,7 @@ async function main(): Promise<void> {
         officialContactNumber: config.settings.reminders.official_contact_number,
         workerGroupId: config.settings.reminders.worker_group_id,
         confidenceThreshold: config.settings.reminders.classifier_confidence_threshold,
+        defaultGoogleMapsUrl: config.settings.reminders.default_google_maps_url,
       },
       config: { templates: config.templates, tours: config.tours },
     });

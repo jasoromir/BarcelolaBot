@@ -18,6 +18,7 @@ export interface ReplyHandlerDeps {
     officialContactNumber: string;
     workerGroupId: string;
     confidenceThreshold: number;
+    defaultGoogleMapsUrl?: string;
   };
   config: {
     templates: TemplatesConfig;
@@ -127,6 +128,7 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       templates: deps.config.templates,
       tours: deps.config.tours,
       officialContactNumber: deps.settings.officialContactNumber,
+      defaultGoogleMapsUrl: deps.settings.defaultGoogleMapsUrl,
     });
     await safeSend(deps, reminder.phone, ack, 'confirmation_ack');
     deps.audit.record({

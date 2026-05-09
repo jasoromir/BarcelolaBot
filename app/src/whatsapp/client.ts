@@ -285,12 +285,30 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   }
 
   async function sendSticker(toChatId: string, messageId: string) {
-    const msg = await client.getMessageById(messageId);
-    if (msg.hasMedia) {
-      const media = await msg.downloadMedia();
-      await client.sendMessage(toChatId, media, { sendMediaAsSticker: true });
+    const msg: any = await client.getMessageById(messageId);
+    if (!msg) {
+      throw new Error(`sendSticker: message not found id=${messageId}`);
     }
-    return { messageId: messageId };
+    console.log(
+      `[wa:sendSticker] src id=${messageId} type=${msg.type} hasMedia=${msg.hasMedia} from=${msg.from} to=${toChatId}`,
+    );
+    if (!msg.hasMedia) {
+      throw new Error(
+        `sendSticker: source message has no media (type=${msg.type}, id=${messageId})`,
+      );
+    }
+    const media = await msg.downloadMedia();
+    if (!media) {
+      throw new Error(`sendSticker: downloadMedia returned null for ${messageId}`);
+    }
+    const dataLen = typeof media.data === 'string' ? media.data.length : 0;
+    console.log(
+      `[wa:sendSticker] downloaded mimetype=${media.mimetype} filename=${media.filename} dataLen=${dataLen}`,
+    );
+    const sent: any = await client.sendMessage(toChatId, media, {
+      sendMediaAsSticker: true,
+    });
+    return { messageId: sent?.id?._serialized ?? messageId };
   }
 
   return {

@@ -372,6 +372,56 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
+  // Inspect stickers in the BARCELOLA BOT group. Returns metadata for the
+  // oldest N sticker messages so we can confirm which one we want to resend.
+  exp.get('/admin/api/stickers/list', async (req, res) => {
+    try {
+      const groupId = (req.query.group_id as string) || '120363425214664727@g.us';
+      const limit = Math.min(Number(req.query.limit ?? 1000), 2000);
+      const messages = await app.whatsapp.getMessages(groupId, limit);
+      const stickers = messages
+        .filter((m) => m.type === 'sticker')
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .slice(0, 10)
+        .map((m) => ({
+          id: m.id,
+          timestamp: m.timestamp,
+          timestampIso: new Date(m.timestamp * 1000).toISOString(),
+          hasMedia: m.hasMedia,
+        }));
+      res.json({ groupId, totalScanned: messages.length, stickerCount: stickers.length, stickers });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Re-send a specific sticker into a target chat (default: back to BARCELOLA
+  // BOT group so we can eyeball it live). Surfaces any sendSticker errors now
+  // that the client throws on hasMedia=false or null downloads.
+  exp.post('/admin/api/stickers/send', async (req, res) => {
+    try {
+      const groupId = (req.body?.group_id as string) || '120363425214664727@g.us';
+      const targetChatId = (req.body?.target_chat_id as string) || groupId;
+      // If a specific sticker id wasn't provided, pick the oldest sticker.
+      let stickerMessageId = req.body?.message_id as string | undefined;
+      if (!stickerMessageId) {
+        const messages = await app.whatsapp.getMessages(groupId, 1000);
+        const oldestSticker = messages
+          .filter((m) => m.type === 'sticker')
+          .sort((a, b) => a.timestamp - b.timestamp)[0];
+        if (!oldestSticker) {
+          res.status(404).json({ error: 'no sticker found in group' });
+          return;
+        }
+        stickerMessageId = oldestSticker.id;
+      }
+      const result = await app.whatsapp.sendSticker(targetChatId, stickerMessageId);
+      res.json({ ok: true, sourceStickerId: stickerMessageId, targetChatId, result });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   exp.post('/admin/api/messages/send-first-two', async (req, res) => {
     try {
       const groupId = '120363425214664727@g.us'; // Barcelola BOT

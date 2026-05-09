@@ -153,7 +153,7 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       // Fetch tomorrow's tours from Wix
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
-      const dateStr = tomorrow.toISOString().split('T')[0];
+      const dateStr: string = tomorrow.toISOString().split('T')[0] as string;
 
       const tours = await app.wix.getToursForDate(dateStr);
 
@@ -163,10 +163,10 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       }
 
       // Build Hebrew message
-      const hebrewMessage: string = buildTomorrowMessage(tours, dateStr);
+      const hebrewMessage = buildTomorrowMessage(tours, dateStr) as string;
 
       // Build guide info
-      const guideInfo: string = buildGuideAssignments(tours);
+      const guideInfo = buildGuideAssignments(tours) as string;
 
       // Send main message
       await app.whatsapp.sendDirect(targetPhone, hebrewMessage);

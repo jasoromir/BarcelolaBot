@@ -5,6 +5,17 @@ import { handleBookingWebhook } from '../webhook/bookingHandler.js';
 export function registerWebhookRoutes(exp: Express, app: App): void {
   exp.post('/webhook/wix', async (req, res) => {
     try {
+      let raw = '';
+      try {
+        raw = JSON.stringify(req.body).slice(0, 10000);
+      } catch {
+        raw = '<unserializable>';
+      }
+      app.logger.info({
+        source: 'webhook',
+        eventType: 'webhook_received',
+        message: `/webhook/wix raw=${raw}`,
+      });
       const outcome = await handleBookingWebhook({
         payload: req.body,
         config: app.config,

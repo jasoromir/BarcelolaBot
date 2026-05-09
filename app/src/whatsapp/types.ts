@@ -59,4 +59,7 @@ export interface WhatsAppClient {
 
   onIncomingDm(handler: IncomingDmHandler): void;
   onReaction(handler: ReactionHandler): void;
+
+  sendStickerFromDataUrl(toChatId: string, dataUrl: string): Promise<SendResult>;
+  downloadStickerBytes(messageId: string): Promise<{ data: string; mimetype: string } | null>;
 }

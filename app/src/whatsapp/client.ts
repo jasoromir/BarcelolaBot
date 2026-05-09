@@ -318,6 +318,50 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     return { messageId: sent?.id?._serialized ?? messageId };
   }
 
+  async function downloadStickerBytes(messageId: string): Promise<{ data: string; mimetype: string } | null> {
+    // Pull the raw sticker bytes directly from whatsapp-web.js's Chromium page
+    // by URL-fetching the sticker from WhatsApp's media CDN. This bypasses the
+    // JS Store's media-key flow that returns null for outbound stickers.
+    const page = (client as any).pupPage;
+    if (!page) return null;
+    const result = await page.evaluate(async (id: string) => {
+      const w = globalThis as any;
+      const ns = w.WWebJS;
+      const mod = w.Store;
+      if (!ns || !mod?.Msg) return { error: 'no Store' };
+      const msg = mod.Msg.get(id);
+      if (!msg) return { error: 'msg not found' };
+      try {
+        const blob = await ns.downloadMedia(msg);
+        if (!blob) return { error: 'downloadMedia null' };
+        const ab = await blob.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(ab);
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i] as number);
+        return { data: w.btoa(binary), mimetype: blob.type || 'image/webp' };
+      } catch (e: any) {
+        return { error: e?.message || String(e) };
+      }
+    }, messageId);
+    if (!result || (result as any).error) {
+      console.log(`[wa:downloadStickerBytes] failed: ${(result as any)?.error}`);
+      return null;
+    }
+    return result as { data: string; mimetype: string };
+  }
+
+  async function sendStickerFromDataUrl(toChatId: string, dataUrl: string) {
+    // data:image/webp;base64,AAAA...
+    const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+    if (!match) throw new Error('sendStickerFromDataUrl: invalid data URL');
+    const mimetype = match[1]!;
+    const data = match[2]!;
+    const MessageMedia = (pkg as any).MessageMedia;
+    const media = new MessageMedia(mimetype, data, 'sticker.webp');
+    const sent: any = await client.sendMessage(toChatId, media, { sendMediaAsSticker: true });
+    return { messageId: sent?.id?._serialized ?? '' };
+  }
+
   return {
     async start(): Promise<void> {
       if (current.kind === 'connected' || current.kind === 'qr_pending') return;
@@ -328,7 +372,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       setState({ kind: 'disconnected' });
     },
     state: () => current,
-    onStateChange: (cb) => listeners.push(cb),
+    onStateChange: (cb: Listener) => listeners.push(cb),
     sendToGroup,
     sendDirect,
     isGroupAdmin,
@@ -337,7 +381,9 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     getMessages,
     forwardMessage,
     sendSticker,
-    onIncomingDm: (h) => dmHandlers.push(h),
-    onReaction: (h) => reactionHandlers.push(h),
+    onIncomingDm: (h: IncomingDmHandler) => dmHandlers.push(h),
+    onReaction: (h: ReactionHandler) => reactionHandlers.push(h),
+    sendStickerFromDataUrl,
+    downloadStickerBytes,
   };
 }

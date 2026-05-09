@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { App } from '../app.js';
 import { createAuth } from './auth.js';
@@ -390,6 +391,64 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
           hasMedia: m.hasMedia,
         }));
       res.json({ groupId, totalScanned: messages.length, stickerCount: stickers.length, stickers });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Extract raw sticker bytes from whatsapp-web.js's Chromium page, save to
+  // DATA_DIR/assets/sticker.webp, then send as a native sticker (no "forwarded"
+  // label). Caches the asset so subsequent sends don't need the source message.
+  exp.post('/admin/api/stickers/capture-and-send', async (req, res) => {
+    try {
+      const groupId = (req.body?.group_id as string) || '120363425214664727@g.us';
+      const targetChatId = (req.body?.target_chat_id as string) || groupId;
+      let stickerMessageId = req.body?.message_id as string | undefined;
+      if (!stickerMessageId) {
+        const messages = await app.whatsapp.getMessages(groupId, 1000);
+        const stickers = messages
+          .filter((m) => m.type === 'sticker')
+          .sort((a, b) => b.timestamp - a.timestamp);
+        const pick = stickers[0];
+        if (!pick) {
+          res.status(404).json({ error: 'no sticker found in group' });
+          return;
+        }
+        stickerMessageId = pick.id;
+      }
+
+      const dataDir = path.resolve(process.env.DATA_DIR ?? './data');
+      const assetsDir = path.join(dataDir, 'assets');
+      if (!fs.existsSync(assetsDir)) fs.mkdirSync(assetsDir, { recursive: true });
+      const assetPath = path.join(assetsDir, 'welcome-sticker.webp');
+
+      let bytes: { data: string; mimetype: string } | null = null;
+      // Re-use the cached asset if we've already captured one.
+      if (fs.existsSync(assetPath) && req.body?.force !== true) {
+        const buf = fs.readFileSync(assetPath);
+        bytes = { data: buf.toString('base64'), mimetype: 'image/webp' };
+      } else {
+        bytes = await app.whatsapp.downloadStickerBytes(stickerMessageId);
+        if (!bytes) {
+          res.status(500).json({
+            error:
+              'downloadStickerBytes returned null — sticker media not accessible, see container logs',
+          });
+          return;
+        }
+        fs.writeFileSync(assetPath, Buffer.from(bytes.data, 'base64'));
+      }
+
+      const dataUrl = `data:${bytes.mimetype};base64,${bytes.data}`;
+      const sent = await app.whatsapp.sendStickerFromDataUrl(targetChatId, dataUrl);
+      res.json({
+        ok: true,
+        sourceStickerId: stickerMessageId,
+        targetChatId,
+        assetPath,
+        assetBytes: Buffer.byteLength(bytes.data, 'base64'),
+        sent,
+      });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

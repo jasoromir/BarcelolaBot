@@ -34,6 +34,8 @@ function fakeClient(partial: Partial<WhatsAppClient> = {}): WhatsAppClient {
     sendSticker: vi.fn(async () => ({ messageId: 'x' }) as SendResult),
     onIncomingDm: vi.fn(),
     onReaction: vi.fn(),
+    sendStickerFromDataUrl: vi.fn(async () => ({ messageId: 'x' }) as SendResult),
+    downloadStickerBytes: vi.fn(async () => null),
     ...partial,
   };
 }

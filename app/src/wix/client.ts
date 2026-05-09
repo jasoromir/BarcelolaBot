@@ -215,6 +215,40 @@ export function createWixClient(opts: WixClientOpts): WixClient {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), timeoutMs);
       try {
+        // Wix requires the current booking revision for the cancel call, so
+        // fetch it first. 404 here → already gone; treat as alreadyCancelled.
+        let revision: string | undefined;
+        try {
+          const getRes = await fetchFn(
+            `${base}/_api/bookings-reader/v2/bookings/${encodeURIComponent(input.bookingId)}`,
+            {
+              method: 'GET',
+              headers: {
+                Authorization: opts.apiKey,
+                'wix-site-id': opts.siteId,
+              },
+              signal: controller.signal,
+            },
+          );
+          if (getRes.status === 404) {
+            return { ok: true, alreadyCancelled: true };
+          }
+          if (!getRes.ok) {
+            const text = await getRes.text();
+            return {
+              ok: false,
+              error: `get-for-revision failed ${getRes.status}: ${text.slice(0, 300)}`,
+            };
+          }
+          const data = (await getRes.json()) as { booking?: { revision?: string } };
+          revision = data.booking?.revision;
+        } catch (err) {
+          return { ok: false, error: `get-for-revision failed: ${(err as Error).message}` };
+        }
+        if (!revision) {
+          return { ok: false, error: 'revision missing from Wix response' };
+        }
+
         const res = await fetchFn(
           `${base}/bookings/v2/bookings/${encodeURIComponent(input.bookingId)}/cancel`,
           {
@@ -225,6 +259,7 @@ export function createWixClient(opts: WixClientOpts): WixClient {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
+              revision,
               participantNotification: { notifyParticipants: false },
               flowControlSettings: {
                 skipCancellationPolicyCheck: true,
@@ -232,9 +267,6 @@ export function createWixClient(opts: WixClientOpts): WixClient {
                 skipBusinessNotification: false,
               },
               // Act as BUSINESS so Wix honors skipCancellationPolicyCheck.
-              // initiator=CUSTOMER still enforces the booking's cancel window
-              // (we hit 72h policy violations on tours booked less than 3 days
-              // ahead).
               initiator: 'BUSINESS',
               reason: input.reason,
             }),

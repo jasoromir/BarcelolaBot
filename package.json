@@ -1,0 +1,10 @@
+{
+  "name": "barcelola-bot-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install": "cd app && npm install",
+    "build": "cd app && npm run build",
+    "start": "cd app && node dist/index.js"
+  }
+}

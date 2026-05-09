@@ -1,9 +1,8 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "cd app && npm install && npm run build"
 
 [deploy]
-startCommand = "cd app && node dist/index.js"
+startCommand = "npm start"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

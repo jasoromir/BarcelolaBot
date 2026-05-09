@@ -226,13 +226,16 @@ export function createWixClient(opts: WixClientOpts): WixClient {
             },
             body: JSON.stringify({
               participantNotification: { notifyParticipants: false },
-              revision: '1',
               flowControlSettings: {
                 skipCancellationPolicyCheck: true,
                 skipRefund: true,
                 skipBusinessNotification: false,
               },
-              initiator: 'CUSTOMER',
+              // Act as BUSINESS so Wix honors skipCancellationPolicyCheck.
+              // initiator=CUSTOMER still enforces the booking's cancel window
+              // (we hit 72h policy violations on tours booked less than 3 days
+              // ahead).
+              initiator: 'BUSINESS',
               reason: input.reason,
             }),
             signal: controller.signal,

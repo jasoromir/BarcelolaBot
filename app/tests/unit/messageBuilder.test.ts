@@ -30,6 +30,7 @@ const templates: TemplatesConfig = {
   anti_reply_footer: 'FOOTER({official_contact_number})',
   no_reply_alert: 'NORE {tour_name_he}',
   worker_forward: 'FWD {client_name}',
+  cancel_notice: 'CNO {client_name}',
 };
 
 describe('buildBroadcastMessage', () => {

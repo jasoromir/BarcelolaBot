@@ -58,6 +58,7 @@ function fakeConfig(mode: 'open' | 'explicit' = 'open'): AppConfig {
       anti_reply_footer: 'FTR {official_contact_number}',
       no_reply_alert: 'NR {tour_name_he}',
       worker_forward: 'FW {client_name}',
+      cancel_notice: 'CN {client_name}',
     },
     allowlist: {
       mode,
@@ -79,6 +80,7 @@ function fakeConfig(mode: 'open' | 'explicit' = 'open'): AppConfig {
         official_contact_number: '+34623964800',
         worker_group_id: '120@g.us',
         classifier_confidence_threshold: 0.7,
+        reply_debounce_seconds: 0,
       },
     },
   };

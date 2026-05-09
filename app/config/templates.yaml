@@ -104,3 +104,15 @@ worker_forward: |
 
   *ההודעה שלו:*
   _{message}_
+
+cancel_notice: |
+  ❌ *ביטול הזמנה על ידי לקוח*
+
+  👤 *לקוח:* {client_name}
+  📞 {phone}
+  🎯 *סיור:* {tour_name_he} — {date} {time}
+
+  *הודעת הלקוח:*
+  _{customer_message}_
+
+  *סטטוס Wix:* {wix_status}

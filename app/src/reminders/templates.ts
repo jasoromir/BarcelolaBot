@@ -110,6 +110,25 @@ export function buildWorkerForward(input: WorkerForwardInput): string {
   });
 }
 
+export interface CancelNoticeInput {
+  reminder: ReminderRow;
+  templates: TemplatesConfig;
+  customerMessage: string;
+  wixStatus: string;
+}
+
+export function buildCancelNotice(input: CancelNoticeInput): string {
+  return interpolate(input.templates.cancel_notice, {
+    client_name: input.reminder.clientName ?? 'Guest',
+    phone: input.reminder.phone,
+    tour_name_he: input.reminder.tourNameHe ?? '(unknown)',
+    date: fmtDateDDMMYY(input.reminder.startAtIso),
+    time: fmtTime(input.reminder.startAtIso),
+    customer_message: input.customerMessage,
+    wix_status: input.wixStatus,
+  });
+}
+
 function resolveTourName(reminder: ReminderRow, tours: ToursConfig): string {
   if (reminder.tourId && tours.tours[reminder.tourId]?.name_he) {
     return tours.tours[reminder.tourId]!.name_he;

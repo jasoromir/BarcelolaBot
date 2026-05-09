@@ -74,6 +74,7 @@ describe('SettingsConfigSchema', () => {
         official_contact_number: '+34623964800',
         worker_group_id: '120@g.us',
         classifier_confidence_threshold: 0.7,
+        reply_debounce_seconds: 0,
       },
     };
     expect(SettingsConfigSchema.parse(v).broadcast.mode).toBe('test');

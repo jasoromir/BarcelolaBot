@@ -165,6 +165,7 @@ async function main(): Promise<void> {
         workerGroupId: config.settings.reminders.worker_group_id,
         confidenceThreshold: config.settings.reminders.classifier_confidence_threshold,
         defaultGoogleMapsUrl: config.settings.reminders.default_google_maps_url,
+        debounceSeconds: config.settings.reminders.reply_debounce_seconds,
       },
       config: { templates: config.templates, tours: config.tours },
     });

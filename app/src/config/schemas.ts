@@ -42,6 +42,7 @@ export const TemplatesConfigSchema = z.object({
   anti_reply_footer: z.string().min(1),
   no_reply_alert: z.string().min(1),
   worker_forward: z.string().min(1),
+  cancel_notice: z.string().min(1),
 });
 export type TemplatesConfig = z.infer<typeof TemplatesConfigSchema>;
 
@@ -80,6 +81,7 @@ export const SettingsConfigSchema = z.object({
     worker_group_id: GroupIdSchema,
     classifier_confidence_threshold: z.number().min(0).max(1),
     default_google_maps_url: z.string().url().optional(),
+    reply_debounce_seconds: z.number().int().nonnegative(),
   }),
 });
 export type SettingsConfig = z.infer<typeof SettingsConfigSchema>;

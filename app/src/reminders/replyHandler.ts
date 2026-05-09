@@ -4,7 +4,12 @@ import type { WhatsAppClient, IncomingDm } from '../whatsapp/types.js';
 import type { WixClient } from '../wix/types.js';
 import type { TemplatesConfig, ToursConfig } from '../config/schemas.js';
 import type { Classifier, ClassificationResult } from './classifier.js';
-import { buildConfirmationAck, buildCancelAck, buildWorkerForward } from './templates.js';
+import {
+  buildConfirmationAck,
+  buildCancelAck,
+  buildWorkerForward,
+  buildCancelNotice,
+} from './templates.js';
 import { normalizePhone } from '../messaging/phoneNormalizer.js';
 
 export interface ReplyHandlerDeps {
@@ -19,6 +24,8 @@ export interface ReplyHandlerDeps {
     workerGroupId: string;
     confidenceThreshold: number;
     defaultGoogleMapsUrl?: string;
+    /** Quiet window after each DM before we classify. 0 = fire immediately. */
+    debounceSeconds?: number;
   };
   config: {
     templates: TemplatesConfig;
@@ -26,8 +33,67 @@ export interface ReplyHandlerDeps {
   };
 }
 
+interface PendingReply {
+  dms: IncomingDm[];
+  timer: NodeJS.Timeout;
+}
+
 export function createReplyHandler(deps: ReplyHandlerDeps) {
-  return async function handleIncoming(dm: IncomingDm): Promise<void> {
+  const debounceMs = Math.max(0, (deps.settings.debounceSeconds ?? 0) * 1000);
+  const buffers = new Map<string, PendingReply>();
+
+  async function flush(phone: string): Promise<void> {
+    const pending = buffers.get(phone);
+    if (!pending) return;
+    buffers.delete(phone);
+    // Merge all buffered bodies with a newline separator so Gemini sees the
+    // full context but keeps natural message boundaries.
+    const merged: IncomingDm = {
+      messageId: pending.dms[pending.dms.length - 1]!.messageId,
+      fromPhoneE164: pending.dms[0]!.fromPhoneE164,
+      body: pending.dms.map((d) => d.body).join('\n'),
+      timestamp: pending.dms[pending.dms.length - 1]!.timestamp,
+    };
+    if (pending.dms.length > 1) {
+      deps.logger.info({
+        source: 'reply',
+        eventType: 'debounce_flush_merged',
+        message: `merged ${pending.dms.length} messages from ${phone}`,
+      });
+    }
+    await processReply(merged);
+  }
+
+  function enqueue(dm: IncomingDm): void {
+    const phone = normalizePhone(dm.fromPhoneE164) ?? dm.fromPhoneE164;
+    const existing = buffers.get(phone);
+    if (existing) {
+      clearTimeout(existing.timer);
+      existing.dms.push(dm);
+      existing.timer = setTimeout(() => {
+        flush(phone).catch((err) =>
+          deps.logger.error({
+            source: 'reply',
+            eventType: 'flush_failed',
+            message: (err as Error).message,
+          }),
+        );
+      }, debounceMs);
+    } else {
+      const timer = setTimeout(() => {
+        flush(phone).catch((err) =>
+          deps.logger.error({
+            source: 'reply',
+            eventType: 'flush_failed',
+            message: (err as Error).message,
+          }),
+        );
+      }, debounceMs);
+      buffers.set(phone, { dms: [dm], timer });
+    }
+  }
+
+  async function processReply(dm: IncomingDm): Promise<void> {
     const nowIso = new Date().toISOString();
     const phone = normalizePhone(dm.fromPhoneE164) ?? dm.fromPhoneE164;
     deps.logger.info({
@@ -198,6 +264,17 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       eventType: 'booking_confirmed',
       message: `confirmed ${reminder.bookingId} count=${newCount}`,
     });
+  }
+
+  // Public entry point. When debounceMs>0 we buffer per-phone and flush after
+  // the quiet window so rapid-fire messages are consolidated into one classify
+  // call. debounceMs=0 keeps the legacy immediate path for tests.
+  return async function handleIncoming(dm: IncomingDm): Promise<void> {
+    if (debounceMs === 0) {
+      await processReply(dm);
+      return;
+    }
+    enqueue(dm);
   };
 }
 
@@ -223,13 +300,20 @@ async function handleCancel(
   });
   await safeSend(deps, reminder.phone, ack, 'cancel_ack');
 
-  // Notify worker group with full context + wix status.
-  const forward = buildWorkerForward({
+  // Notify worker group with the dedicated cancel-notice template so it
+  // doesn't read as an unrelated off-topic forward.
+  const wixStatus = wixResult.ok
+    ? wixResult.alreadyCancelled
+      ? 'כבר בוטל קודם'
+      : 'בוטל בהצלחה ✅'
+    : `נכשל — ${wixResult.error ?? 'unknown'}`;
+  const notice = buildCancelNotice({
     reminder,
     templates: deps.config.templates,
-    message: `CANCEL: ${dm.body}\n(wix: ${wixResult.ok ? (wixResult.alreadyCancelled ? 'already_cancelled' : 'cancelled') : `FAILED ${wixResult.error ?? 'unknown'}`})`,
+    customerMessage: dm.body,
+    wixStatus,
   });
-  await safeSendGroup(deps, deps.settings.workerGroupId, forward, 'cancel_notice');
+  await safeSendGroup(deps, deps.settings.workerGroupId, notice, 'cancel_notice');
 
   deps.logger.info({
     source: 'reply',

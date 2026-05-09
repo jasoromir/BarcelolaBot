@@ -19,3 +19,4 @@ reminders:
   official_contact_number: "+34623964800"
   worker_group_id: "120363099999999999@g.us"
   classifier_confidence_threshold: 0.7
+  reply_debounce_seconds: 0

@@ -141,7 +141,7 @@ async function main(): Promise<void> {
       webDir,
     },
   });
-  const port = Number(process.env.HTTP_PORT ?? 3000);
+  const port = Number(process.env.PORT ?? process.env.HTTP_PORT ?? 3000);
   server.listen(port, () => {
     logger.info({
       source: 'startup',

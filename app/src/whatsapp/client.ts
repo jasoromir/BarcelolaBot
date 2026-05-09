@@ -1,9 +1,36 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import pkg from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import type { WhatsAppState } from '../types.js';
 import type { SendResult, WhatsAppClient } from './types.js';
 
 const { Client, LocalAuth } = pkg;
+
+function clearChromiumSingletonLocks(sessionDir: string): void {
+  // Containers killed without graceful shutdown leave Singleton{Lock,Socket,Cookie}
+  // in the Chromium profile; whatsapp-web.js's LocalAuth stores the profile under
+  // `${sessionDir}/session-<clientId|Default>/`. Without cleanup the next boot fails
+  // with "The profile appears to be in use by another Chromium process".
+  if (!fs.existsSync(sessionDir)) return;
+  const roots = [sessionDir, ...fs.readdirSync(sessionDir).map((e) => path.join(sessionDir, e))];
+  for (const root of roots) {
+    try {
+      const stat = fs.statSync(root);
+      if (!stat.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+      const p = path.join(root, name);
+      try {
+        fs.rmSync(p, { force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  }
+}
 
 export interface WhatsAppClientOpts {
   sessionDir: string;
@@ -21,6 +48,8 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     for (const l of listeners) l(s);
   };
 
+  clearChromiumSingletonLocks(opts.sessionDir);
+
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: opts.sessionDir }),
     puppeteer: {
@@ -32,8 +61,6 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--no-first-run',
-        '--no-zygote',
-        '--single-process',
       ],
     },
   });

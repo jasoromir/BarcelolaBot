@@ -117,14 +117,16 @@ export class RemindersStore {
   }
 
   findActiveForReply(phone: string, nowIso: string): ReminderRow | null {
-    // The most recent reminder whose tour hasn't started yet, that's in a state
-    // where a reply would still be meaningful.
+    // Any reminder whose tour hasn't started yet. We keep listening even after
+    // confirm/cancel so customers can change their mind or ask follow-up
+    // questions. Idempotency (don't double-ack, don't double-cancel) is
+    // enforced in the reply handler by comparing current status to the new
+    // intent.
     const row = this.db
       .prepare(
         `SELECT * FROM reminders
          WHERE phone = ?
            AND start_at_iso > ?
-           AND status IN ('awaiting_send', 'awaiting_reply', 'confirmed')
          ORDER BY start_at_iso ASC
          LIMIT 1`,
       )

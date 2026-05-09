@@ -107,6 +107,27 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
     }
 
     if (cls.intent === 'cancel') {
+      if (reminder.status === 'cancelled') {
+        // Already cancelled — silently record and exit (no double-cancel, no
+        // duplicate ack). A human can pick up any follow-up from reply_audit.
+        deps.audit.record({
+          ts: nowIso,
+          phone,
+          bookingId: reminder.bookingId,
+          rawText: dm.body,
+          intent: 'cancel',
+          participantCount: null,
+          confidence: cls.confidence,
+          forwarded: false,
+          notes: 'already_cancelled',
+        });
+        deps.logger.info({
+          source: 'reply',
+          eventType: 'cancel_ignored_already_cancelled',
+          message: `duplicate cancel for ${reminder.bookingId}`,
+        });
+        return;
+      }
       await handleCancel(deps, reminder, dm, nowIso);
       deps.audit.record({
         ts: nowIso,
@@ -122,8 +143,33 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       return;
     }
 
-    // confirm or update_count — both end up at "confirmed" state.
+    // confirm or update_count
     const newCount = cls.participantCount ?? reminder.participantCount;
+    const countChanged = newCount !== reminder.participantCount;
+    const wasAlreadyConfirmed = reminder.status === 'confirmed';
+
+    // Idempotency: if already confirmed with the same count and no count change
+    // was requested, don't re-send the ack — just log and exit.
+    if (wasAlreadyConfirmed && !countChanged) {
+      deps.audit.record({
+        ts: nowIso,
+        phone,
+        bookingId: reminder.bookingId,
+        rawText: dm.body,
+        intent: cls.intent,
+        participantCount: cls.participantCount,
+        confidence: cls.confidence,
+        forwarded: false,
+        notes: 'already_confirmed_same_count',
+      });
+      deps.logger.info({
+        source: 'reply',
+        eventType: 'confirm_ignored_duplicate',
+        message: `duplicate confirm for ${reminder.bookingId}`,
+      });
+      return;
+    }
+
     deps.reminders.setStatus(reminder.bookingId, 'confirmed', {
       participantCount: newCount,
       lastReplyTs: nowIso,
@@ -145,7 +191,7 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       participantCount: cls.participantCount,
       confidence: cls.confidence,
       forwarded: false,
-      notes: null,
+      notes: wasAlreadyConfirmed ? 'count_changed' : null,
     });
     deps.logger.info({
       source: 'reply',

@@ -395,6 +395,37 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
+  // Forward a sticker to a target chat. Unlike download+reupload, forwarding
+  // preserves the sticker via WhatsApp server-side without requiring us to
+  // fetch the media payload (which hangs on old messages + returns null on
+  // outbound messages sent by the bot itself).
+  exp.post('/admin/api/stickers/forward', async (req, res) => {
+    try {
+      const groupId = (req.body?.group_id as string) || '120363425214664727@g.us';
+      const targetChatId = (req.body?.target_chat_id as string) || groupId;
+      let stickerMessageId = req.body?.message_id as string | undefined;
+      if (!stickerMessageId) {
+        const messages = await app.whatsapp.getMessages(groupId, 1000);
+        // Prefer incoming stickers (false_*); skip fromMe=true ones since their
+        // media isn't downloadable but forwarding works on either.
+        const stickers = messages
+          .filter((m) => m.type === 'sticker')
+          .sort((a, b) => b.timestamp - a.timestamp); // newest first
+        const oldestIncoming = stickers.find((s) => s.id.startsWith('false_'));
+        const pick = oldestIncoming ?? stickers[0];
+        if (!pick) {
+          res.status(404).json({ error: 'no sticker found in group' });
+          return;
+        }
+        stickerMessageId = pick.id;
+      }
+      const result = await app.whatsapp.forwardMessage(stickerMessageId, targetChatId);
+      res.json({ ok: true, sourceStickerId: stickerMessageId, targetChatId, result });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Re-send a specific sticker into a target chat (default: back to BARCELOLA
   // BOT group so we can eyeball it live). Surfaces any sendSticker errors now
   // that the client throws on hasMedia=false or null downloads.

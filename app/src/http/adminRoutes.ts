@@ -163,10 +163,10 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       }
 
       // Build Hebrew message
-      const hebrewMessage = buildTomorrowMessage(tours, dateStr);
+      const hebrewMessage: string = buildTomorrowMessage(tours, dateStr);
 
       // Build guide info
-      const guideInfo = buildGuideAssignments(tours);
+      const guideInfo: string = buildGuideAssignments(tours);
 
       // Send main message
       await app.whatsapp.sendDirect(targetPhone, hebrewMessage);
@@ -188,7 +188,7 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
-  function buildTomorrowMessage(tours: any[], date: string) {
+  function buildTomorrowMessage(tours: any[], date: string): string {
     const weekdays = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
     const dateObj = new Date(date);
     const weekday = weekdays[dateObj.getDay()];
@@ -215,7 +215,7 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     return msg;
   }
 
-  function buildGuideAssignments(tours: any[]) {
+  function buildGuideAssignments(tours: any[]): string {
     let msg = '*הדרכות למחר:*\n\n';
 
     for (const tour of tours) {

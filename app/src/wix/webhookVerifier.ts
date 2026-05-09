@@ -63,36 +63,26 @@ function fmtTime(iso: string, tz = 'Europe/Madrid'): string {
 const WixSessionBookedSchema = z.object({
   data: z.object({
     order_id: z.string().min(1),
+    booking_id: z.string().optional(),
+    service_id: z.string().optional(),
+    booked_entity_id: z.string().optional(),
+    service_name: z.string().optional(),
+    service_name_main_language: z.string().optional(),
     booking_contact_phone: z.string().min(1),
     booking_contact_email: z.string().optional(),
+    booking_contact_first_name: z.string().optional(),
+    booking_contact_last_name: z.string().optional(),
+    contact: z
+      .object({
+        name: z.object({ first: z.string().optional(), last: z.string().optional() }).optional(),
+      })
+      .optional(),
+    number_of_participants: z.number().optional(),
     start_date: z.string().min(1),
-    booked_entity_id: z.string().optional(),
     bookings_page_url: z.string().optional(),
     business_name: z.string().optional(),
   }),
 });
-
-function titleFromBookingsPageUrl(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  try {
-    const u = new URL(url);
-    const segs = u.pathname.split('/').filter(Boolean);
-    const last = segs[segs.length - 1];
-    if (!last) return undefined;
-    return decodeURIComponent(last).replace(/-/g, ' ');
-  } catch {
-    return undefined;
-  }
-}
-
-function nameFromEmail(email: string | undefined): string | undefined {
-  if (!email) return undefined;
-  const local = email.split('@')[0];
-  if (!local) return undefined;
-  const cleaned = local.replace(/[._+\-]+/g, ' ').replace(/\d+$/g, '').trim();
-  if (!cleaned) return undefined;
-  return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 export function parseBookingWebhook(payload: unknown): ParseResult {
   // Try the nested shape first (used by direct-API fixtures and tests).
@@ -125,20 +115,23 @@ export function parseBookingWebhook(payload: unknown): ParseResult {
   const flat = WixSessionBookedSchema.safeParse(payload);
   if (flat.success) {
     const d = flat.data.data;
+    const first = d.booking_contact_first_name ?? d.contact?.name?.first ?? '';
+    const last = d.booking_contact_last_name ?? d.contact?.name?.last ?? '';
+    const clientName =
+      [first, last].filter(Boolean).join(' ').trim() ||
+      d.booking_contact_email ||
+      'Guest';
     return {
       ok: true,
       event: {
         bookingId: d.order_id,
-        tourId: d.booked_entity_id ?? '',
-        tourTitle: titleFromBookingsPageUrl(d.bookings_page_url),
+        tourId: d.service_id ?? '',
+        tourTitle: d.service_name_main_language ?? d.service_name,
         phone: d.booking_contact_phone,
-        clientName:
-          nameFromEmail(d.booking_contact_email) ??
-          d.booking_contact_email ??
-          'Guest',
+        clientName,
         date: fmtDate(d.start_date),
         time: fmtTime(d.start_date),
-        participantCount: 1,
+        participantCount: d.number_of_participants ?? 1,
       },
     };
   }

@@ -26,4 +26,43 @@ describe('parseBookingWebhook', () => {
     const result = parseBookingWebhook({ foo: 'bar' });
     expect(result.ok).toBe(false);
   });
+
+  it('parses Wix native sessions_booked payload (flat snake_case)', () => {
+    const wixNative = {
+      data: {
+        order_id: 'order-abc-123',
+        booking_contact_phone: '+34651886491',
+        booking_contact_email: 'lianak227@gmail.com',
+        start_date: '2026-05-15T10:00:00.000+02:00',
+        booked_entity_id: '4422ee5f-957b-45c8-bf06-876482fd2b57',
+        bookings_page_url:
+          'https://www.barcelola-tours.com/booking-calendar/המסע-בעקבות-גאודי-והמודרניסטה',
+        business_name: 'Barcelola Tours',
+      },
+    };
+    const result = parseBookingWebhook(wixNative);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.event.bookingId).toBe('order-abc-123');
+    expect(result.event.phone).toBe('+34651886491');
+    expect(result.event.tourId).toBe('4422ee5f-957b-45c8-bf06-876482fd2b57');
+    expect(result.event.date).toBe('2026-05-15');
+    expect(result.event.time).toBe('10:00');
+    expect(result.event.clientName).toBe('Lianak');
+  });
+
+  it('falls back to email when name cannot be derived', () => {
+    const wixNative = {
+      data: {
+        order_id: 'order-xyz',
+        booking_contact_phone: '+34651886491',
+        start_date: '2026-05-15T10:00:00.000+02:00',
+      },
+    };
+    const result = parseBookingWebhook(wixNative);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.event.clientName).toBe('Guest');
+    expect(result.event.tourId).toBe('');
+  });
 });

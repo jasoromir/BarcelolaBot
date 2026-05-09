@@ -33,8 +33,8 @@ confidence is 0..1. If ambiguous or the message mixes topics, lower the confiden
 participant_count: extract the integer count only when clearly stated by the user. null otherwise. Ignore phone numbers, street numbers, dates, times.`;
 
 export function createGeminiClassifier(apiKey: string): Classifier {
-  const endpoint =
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   return {
     async classify(text, context): Promise<ClassificationResult> {

@@ -80,6 +80,7 @@ export class RemindersStore {
            participant_count = excluded.participant_count,
            status = excluded.status,
            send_at_iso = excluded.send_at_iso,
+           sent_at_iso = excluded.sent_at_iso,
            updated_at = @now`,
       )
       .run({

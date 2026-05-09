@@ -47,6 +47,7 @@ export function buildReminder24h(input: ReminderTemplateInput): string {
     date: fmtDateDDMMYY(input.reminder.startAtIso),
     time: fmtTime(input.reminder.startAtIso),
     participant_count: String(input.reminder.participantCount),
+    official_contact_number: input.officialContactNumber,
     anti_reply_footer: footer,
   });
 }
@@ -67,7 +68,6 @@ export function buildConfirmationAck(input: ConfirmationAckInput): string {
   const meetingPoint = tour?.meeting_point_he ?? '';
   const mapsUrl = tour?.google_maps_url ?? input.defaultGoogleMapsUrl;
   const mapsUrlLine = mapsUrl ? `📍 ${mapsUrl}` : '';
-  const footer = antiReplyFooter(input.templates.anti_reply_footer, input.officialContactNumber);
   return interpolate(input.templates.confirmation_ack, {
     client_name: input.reminder.clientName ?? 'Guest',
     tour_name_he: tourName,
@@ -76,7 +76,7 @@ export function buildConfirmationAck(input: ConfirmationAckInput): string {
     participant_count: String(input.reminder.participantCount),
     meeting_point_he: meetingPoint,
     maps_url_line: mapsUrlLine,
-    anti_reply_footer: footer,
+    official_contact_number: input.officialContactNumber,
   });
 }
 

@@ -30,6 +30,11 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
   return async function handleIncoming(dm: IncomingDm): Promise<void> {
     const nowIso = new Date().toISOString();
     const phone = normalizePhone(dm.fromPhoneE164) ?? dm.fromPhoneE164;
+    deps.logger.info({
+      source: 'reply',
+      eventType: 'reply_received',
+      message: `incoming from ${phone}: ${dm.body.slice(0, 200)}`,
+    });
     const reminder = deps.reminders.findActiveForReply(phone, nowIso);
 
     if (!reminder) {

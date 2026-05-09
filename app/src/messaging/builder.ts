@@ -75,6 +75,7 @@ export function buildBookingConfirmation(input: BookingConfirmationInput): strin
     date: formattedDate,
     time: input.event.time,
     participant_count: String(input.event.participantCount || 1),
+    official_contact_number: input.officialContactNumber,
     anti_reply_footer: footer,
   });
 }

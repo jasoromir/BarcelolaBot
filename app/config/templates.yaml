@@ -35,7 +35,7 @@ booking_confirmation: |
 
   https://chat.whatsapp.com/IyJ1FzdxjUxLvJNk8gCOLQ
 
-  {anti_reply_footer}
+  ⚠️ הערה: לכל שאלה או מידע נוסף, נא לא להשיב למספר זה, צרו קשר בטלפון {official_contact_number}.
 
 booking_confirmation_lt24h: |
   הולה {client_name}! 👋
@@ -53,7 +53,7 @@ booking_confirmation_lt24h: |
   🌻 הצטרפו גם לקבוצת הווטסאפ שלנו לטיפים והמלצות על ברצלונה:
   https://chat.whatsapp.com/IyJ1FzdxjUxLvJNk8gCOLQ
 
-  {anti_reply_footer}
+  ⚠️ הערה: לכל שאלה או מידע נוסף, נא לא להשיב למספר זה, צרו קשר בטלפון {official_contact_number}.
 
 reminder_24h: |
   הולה {client_name}! 👋
@@ -66,8 +66,6 @@ reminder_24h: |
   🔢 *מספר משתתפים חדש* — אם השתנה מספר האנשים
   ❌ *"מבטל"* — אם אתם לא יכולים להגיע
 
-  {anti_reply_footer}
-
 confirmation_ack: |
   תודה {client_name}! 🌻
   ההזמנה שלכם ל-*{tour_name_he}* בתאריך {date} בשעה {time} אושרה עבור {participant_count} משתתפים ✅
@@ -79,8 +77,6 @@ confirmation_ack: |
 
   🌻 חפשו את המדריך/ה שלנו עם חמנייה!
 
-  {anti_reply_footer}
-
 cancel_ack: |
   ביטול התקבל 🌻
   חבל שלא תוכלו להצטרף הפעם, {client_name}.
@@ -89,8 +85,7 @@ cancel_ack: |
   לכל שאלה אנא פנו ל-{official_contact_number}
 
 anti_reply_footer: |
-  ⚠️ *שימו לב:* לשאלות או מידע נוסף פנו אלינו דרך {official_contact_number}.
-  בהודעה זו תוכלו להשיב רק עם "מאשר" / "מבטל" / מספר משתתפים חדש.
+  ⚠️ הערה: לכל שאלה או מידע נוסף, נא לא להשיב למספר זה, צרו קשר בטלפון {official_contact_number}.
 
 no_reply_alert: |
   ⚠️ *תזכורת: לא התקבלה תשובה*

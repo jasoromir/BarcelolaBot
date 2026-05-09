@@ -79,26 +79,43 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   client.on('disconnected', () => setState({ kind: 'disconnected' }));
   client.on('auth_failure', () => setState({ kind: 'disconnected' }));
 
-  client.on('message', (msg: any) => {
-    // Ignore own messages, groups, non-text, and status broadcasts.
-    if (msg.fromMe) return;
-    const from: string = msg.from ?? '';
+  const seenMessageIds = new Set<string>();
+  const handleMessageEvent = (msg: any, eventName: string) => {
+    const from: string = msg?.from ?? '';
+    const fromMe = Boolean(msg?.fromMe);
+    const bodyLen = typeof msg?.body === 'string' ? msg.body.length : 0;
+    const serialized = msg?.id?._serialized ?? '';
+    console.log(
+      `[wa:${eventName}] id=${serialized} from=${from} fromMe=${fromMe} bodyLen=${bodyLen} type=${msg?.type}`,
+    );
+    if (fromMe) return;
     if (!from.endsWith('@c.us')) return;
     if (typeof msg.body !== 'string' || msg.body.length === 0) return;
+    if (serialized && seenMessageIds.has(serialized)) return;
+    if (serialized) {
+      seenMessageIds.add(serialized);
+      // trim to prevent unbounded growth
+      if (seenMessageIds.size > 500) {
+        const first = seenMessageIds.values().next().value;
+        if (first) seenMessageIds.delete(first);
+      }
+    }
     const digits = from.replace(/@c\.us$/, '');
     const fromPhoneE164 = digits.startsWith('+') ? digits : `+${digits}`;
     const dm = {
-      messageId: msg.id?._serialized ?? '',
+      messageId: serialized,
       fromPhoneE164,
       body: msg.body,
       timestamp: typeof msg.timestamp === 'number' ? msg.timestamp : Math.floor(Date.now() / 1000),
     };
     for (const h of dmHandlers) {
-      Promise.resolve(h(dm)).catch(() => {
-        // handler failures must not kill the client
+      Promise.resolve(h(dm)).catch((err) => {
+        console.error('[wa:dmHandler] error', err);
       });
     }
-  });
+  };
+  client.on('message', (msg: any) => handleMessageEvent(msg, 'message'));
+  client.on('message_create', (msg: any) => handleMessageEvent(msg, 'message_create'));
 
   async function sendToGroup(groupId: string, body: string): Promise<SendResult> {
     const msg = await client.sendMessage(groupId, body);

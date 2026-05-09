@@ -24,8 +24,17 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: opts.sessionDir }),
     puppeteer: {
-      headless: true,  // Back to headless - works fine with personal account
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+      ],
     },
   });
 

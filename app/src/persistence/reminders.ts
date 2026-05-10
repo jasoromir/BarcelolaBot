@@ -118,17 +118,32 @@ export class RemindersStore {
   }
 
   findActiveForReply(phone: string, nowIso: string): ReminderRow | null {
-    // Any reminder whose tour hasn't started yet. We keep listening even after
-    // confirm/cancel so customers can change their mind or ask follow-up
-    // questions. Idempotency (don't double-ack, don't double-cancel) is
-    // enforced in the reply handler by comparing current status to the new
-    // intent.
+    // Any reminder whose tour hasn't started yet. We keep listening even
+    // after confirm/cancel so customers can change their mind or ask
+    // follow-up questions.
+    //
+    // When a phone has multiple active future reminders (e.g. one confirmed
+    // yesterday + a brand new booking today), prefer the one that's still
+    // waiting for a reply, then prefer the most recently created. This
+    // prevents a stale 'confirmed' row from hijacking a reply that was
+    // obviously meant for the fresh booking.
+    //
+    // The status ranking uses a CASE expression to put awaiting_reply first,
+    // then awaiting_send, then confirmed, then cancelled.
     const row = this.db
       .prepare(
         `SELECT * FROM reminders
          WHERE phone = ?
            AND start_at_iso > ?
-         ORDER BY start_at_iso ASC
+         ORDER BY
+           CASE status
+             WHEN 'awaiting_reply' THEN 0
+             WHEN 'awaiting_send' THEN 1
+             WHEN 'confirmed' THEN 2
+             WHEN 'cancelled' THEN 3
+             ELSE 4
+           END ASC,
+           created_at DESC
          LIMIT 1`,
       )
       .get(phone, nowIso) as DBRow | undefined;

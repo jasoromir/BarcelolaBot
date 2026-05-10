@@ -1,5 +1,33 @@
 export type ReplyIntent = 'confirm' | 'cancel' | 'update_count' | 'other';
 
+/**
+ * Gemini free-tier quota is bursty (15 RPM, 1M TPD). When we hit 429 we back
+ * off with a progressively longer wait and try again. Persistent 429 after
+ * the final attempt propagates up and the reply handler forwards to the
+ * worker group (fail-open).
+ */
+export async function fetchWithGeminiRetry(
+  url: string,
+  body: unknown,
+  delaysMs: number[] = [2_000, 5_000, 15_000],
+): Promise<Response> {
+  let attempt = 0;
+  // One initial try + delaysMs.length retries.
+  while (true) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 429) return res;
+    const wait = delaysMs[attempt];
+    if (wait === undefined) return res; // exhausted retries
+    console.log(`[gemini] 429 quota, retrying in ${wait}ms (attempt ${attempt + 1})`);
+    await new Promise((r) => setTimeout(r, wait));
+    attempt += 1;
+  }
+}
+
 export interface ClassificationResult {
   intent: ReplyIntent;
   participantCount: number | null;
@@ -59,11 +87,10 @@ export function createGeminiClassifier(apiKey: string): Classifier {
           },
         },
       };
-      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const res = await fetchWithGeminiRetry(
+        `${endpoint}?key=${encodeURIComponent(apiKey)}`,
+        body,
+      );
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`gemini ${res.status}: ${errText.slice(0, 300)}`);

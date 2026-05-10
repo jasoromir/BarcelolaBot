@@ -10,6 +10,8 @@ export interface Drafter {
   draft(ctx: DraftContext): Promise<string | null>;
 }
 
+import { fetchWithGeminiRetry } from './classifier.js';
+
 const SYSTEM_PROMPT = `You draft short, warm Hebrew WhatsApp replies on behalf of Barcelola Tours — a tour company in Barcelona run by Israeli guides.
 
 Voice:
@@ -56,11 +58,10 @@ export function createGeminiDrafter(apiKey: string): Drafter {
           },
         },
       };
-      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const res = await fetchWithGeminiRetry(
+        `${endpoint}?key=${encodeURIComponent(apiKey)}`,
+        body,
+      );
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`gemini draft ${res.status}: ${errText.slice(0, 300)}`);

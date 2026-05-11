@@ -7,6 +7,7 @@ export interface ScheduledTasks {
   nightly: cron.ScheduledTask;
   morning: cron.ScheduledTask;
   prune: cron.ScheduledTask;
+  waHealth: cron.ScheduledTask;
 }
 
 export function startScheduler(app: App): ScheduledTasks {
@@ -58,6 +59,38 @@ export function startScheduler(app: App): ScheduledTasks {
     { timezone: tz },
   );
 
+  // Log the WhatsApp connection state every 15 minutes. Structured events
+  // give Railway's log-based alerting (and any external monitor) a stable
+  // hook. The level escalates to 'error' when WA has been disconnected
+  // long enough that auto-reconnect has likely exhausted its fast backoff.
+  let disconnectedSinceMs: number | null = null;
+  const waHealth = cron.schedule(
+    '*/15 * * * *',
+    () => {
+      const state = app.whatsapp.state();
+      if (state.kind === 'connected') {
+        disconnectedSinceMs = null;
+        app.logger.info({
+          source: 'scheduler',
+          eventType: 'wa_health_check',
+          message: `wa=connected phone=${state.phone}`,
+          metadata: { status: 'connected', phone: state.phone },
+        });
+        return;
+      }
+      if (disconnectedSinceMs === null) disconnectedSinceMs = Date.now();
+      const elapsedMinutes = Math.floor((Date.now() - disconnectedSinceMs) / 60_000);
+      const level = elapsedMinutes >= 15 ? 'error' : 'warn';
+      app.logger[level]({
+        source: 'scheduler',
+        eventType: 'wa_health_check',
+        message: `wa=${state.kind} disconnectedForMinutes=${elapsedMinutes}`,
+        metadata: { status: state.kind, disconnectedForMinutes: elapsedMinutes },
+      });
+    },
+    { timezone: tz },
+  );
+
   app.logger.info({
     source: 'scheduler',
     eventType: 'scheduler_started',
@@ -68,5 +101,5 @@ export function startScheduler(app: App): ScheduledTasks {
     },
   });
 
-  return { nightly, morning, prune };
+  return { nightly, morning, prune, waHealth };
 }

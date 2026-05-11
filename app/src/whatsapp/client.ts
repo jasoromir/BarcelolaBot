@@ -80,10 +80,50 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   });
   client.on('ready', () => {
     const phone = client.info?.wid?.user ? `+${client.info.wid.user}` : 'unknown';
+    reconnectAttempt = 0;
     setState({ kind: 'connected', phone });
   });
-  client.on('disconnected', () => setState({ kind: 'disconnected' }));
-  client.on('auth_failure', () => setState({ kind: 'disconnected' }));
+
+  // Auto-reconnect with bounded exponential backoff. WhatsApp-web drops the
+  // session occasionally (network blips, server restarts, Chromium hiccups);
+  // without this the bot stays disconnected until somebody hits /admin.
+  // Backoff: 30s → 2m → 5m → 5m forever. Caller can disable by setting
+  // PUPPETEER_AUTO_RECONNECT=false.
+  const reconnectDelaysMs = [30_000, 120_000, 300_000];
+  let reconnectAttempt = 0;
+  let reconnectTimer: NodeJS.Timeout | null = null;
+  const autoReconnectEnabled = process.env.PUPPETEER_AUTO_RECONNECT !== 'false';
+
+  const scheduleReconnect = (reason: string) => {
+    if (!autoReconnectEnabled) return;
+    if (reconnectTimer) return; // already scheduled
+    const idx = Math.min(reconnectAttempt, reconnectDelaysMs.length - 1);
+    const delay = reconnectDelaysMs[idx]!;
+    console.log(`[wa:reconnect] scheduling in ${delay}ms (attempt ${reconnectAttempt + 1}, reason=${reason})`);
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null;
+      reconnectAttempt += 1;
+      try {
+        console.log(`[wa:reconnect] attempting client.initialize()`);
+        await client.initialize();
+      } catch (err) {
+        console.error(`[wa:reconnect] initialize failed:`, err);
+        scheduleReconnect(`retry-${(err as Error).message}`);
+      }
+    }, delay);
+  };
+
+  client.on('disconnected', (reason: any) => {
+    console.log(`[wa:disconnected] reason=${reason}`);
+    setState({ kind: 'disconnected' });
+    scheduleReconnect(`disconnected:${reason}`);
+  });
+  client.on('auth_failure', (msg: any) => {
+    console.log(`[wa:auth_failure] ${msg}`);
+    setState({ kind: 'disconnected' });
+    // Don't auto-reconnect on auth_failure; it usually means the session is
+    // logged out / needs a fresh QR scan, and retrying just burns attempts.
+  });
 
   const seenMessageIds = new Set<string>();
   const handleMessageEvent = async (msg: any, eventName: string) => {

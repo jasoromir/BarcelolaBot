@@ -21,8 +21,11 @@ export const ToursConfigSchema = z.object({
     z.object({
       name_he: z.string().min(1),
       emoji: z.string().min(1),
-      description_he: z.string().min(1),
-      meeting_point_he: z.string().min(1),
+      // description and meeting point may be blank for auto-seeded entries
+      // whose Wix service doesn't yet have Hebrew copy. The builder treats
+      // empty strings as "fall back to Wix data", so empty is safe.
+      description_he: z.string(),
+      meeting_point_he: z.string(),
       google_maps_url: z.string().url().optional(),
     }),
   ),

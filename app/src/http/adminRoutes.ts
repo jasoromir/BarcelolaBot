@@ -439,6 +439,57 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
+  // Patch one or more tours in the overlay tours.yaml. Body: { tours: {
+  // "<service_id>": { name_he?, emoji?, description_he?, meeting_point_he?,
+  //                   google_maps_url? } } }
+  // Only fields present in the patch are updated. Unknown service_ids are
+  // added as new entries. Entries not mentioned in the patch are preserved.
+  exp.post('/admin/api/tours/patch', async (req, res) => {
+    try {
+      const patch = (req.body?.tours ?? {}) as Record<
+        string,
+        {
+          name_he?: string;
+          emoji?: string;
+          description_he?: string;
+          meeting_point_he?: string;
+          google_maps_url?: string;
+        }
+      >;
+      if (typeof patch !== 'object' || Array.isArray(patch) || !Object.keys(patch).length) {
+        res.status(400).json({ error: 'tours object required with at least one entry' });
+        return;
+      }
+      const existing = { ...app.config.tours.tours };
+      for (const [id, fields] of Object.entries(patch)) {
+        const prev = existing[id] ?? {
+          name_he: '',
+          emoji: '🌻',
+          description_he: '',
+          meeting_point_he: '',
+        };
+        existing[id] = {
+          name_he: fields.name_he ?? prev.name_he,
+          emoji: fields.emoji ?? prev.emoji,
+          description_he: fields.description_he ?? prev.description_he,
+          meeting_point_he: fields.meeting_point_he ?? prev.meeting_point_he,
+          ...(fields.google_maps_url ?? prev.google_maps_url
+            ? { google_maps_url: fields.google_maps_url ?? prev.google_maps_url }
+            : {}),
+        };
+      }
+      const yamlBody = yaml.dump({ tours: existing }, { sortKeys: false, lineWidth: 200 });
+      const overlayDir = path.join(path.resolve(process.env.DATA_DIR ?? './data'), 'config');
+      if (!fs.existsSync(overlayDir)) fs.mkdirSync(overlayDir, { recursive: true });
+      const target = path.join(overlayDir, 'tours.yaml');
+      fs.writeFileSync(target, yamlBody, 'utf8');
+      app.reloadConfig();
+      res.json({ ok: true, patched: Object.keys(patch).length, total: Object.keys(existing).length });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Inspect stickers in the BARCELOLA BOT group. Returns metadata for the
   // oldest N sticker messages so we can confirm which one we want to resend.
   exp.get('/admin/api/stickers/list', async (req, res) => {

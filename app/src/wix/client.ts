@@ -5,6 +5,7 @@ import type {
   UpdateParticipantsInput,
   UpdateParticipantsResult,
   WixClient,
+  WixService,
 } from './types.js';
 
 export interface WixClientOpts {
@@ -306,6 +307,62 @@ export function createWixClient(opts: WixClientOpts): WixClient {
         return { ok: true };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
+      } finally {
+        clearTimeout(t);
+      }
+    },
+
+    async listServices(): Promise<WixService[]> {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const out: WixService[] = [];
+        let offset = 0;
+        for (let page = 0; page < 10; page++) {
+          const res = await fetchFn(`${base}/bookings/v2/services/query`, {
+            method: 'POST',
+            headers: {
+              Authorization: opts.apiKey,
+              'wix-site-id': opts.siteId,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              query: { paging: { limit: 100, offset } },
+            }),
+            signal: controller.signal,
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`listServices ${res.status}: ${text.slice(0, 300)}`);
+          }
+          const data = (await res.json()) as {
+            services?: Array<{
+              id: string;
+              name?: string;
+              description?: string;
+              hidden?: boolean;
+              type?: string;
+              category?: { name?: string };
+              locations?: Array<{ calculatedAddress?: { formattedAddress?: string } }>;
+            }>;
+            pagingMetadata?: { total?: number; count?: number };
+          };
+          const batch = data.services ?? [];
+          for (const s of batch) {
+            out.push({
+              id: s.id,
+              name: s.name ?? '',
+              description: s.description,
+              category: s.category?.name,
+              location: s.locations?.[0]?.calculatedAddress?.formattedAddress,
+              hidden: Boolean(s.hidden),
+              type: s.type ?? 'UNKNOWN',
+            });
+          }
+          if (batch.length < 100) break;
+          offset += 100;
+        }
+        return out;
       } finally {
         clearTimeout(t);
       }

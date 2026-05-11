@@ -33,13 +33,29 @@ function readYaml<T>(filePath: string, schema: z.ZodType<T>): T {
   }
 }
 
-export function loadConfig(configDir: string): AppConfig {
-  const p = (name: string) => path.join(configDir, name);
+export interface LoadConfigOpts {
+  /**
+   * Optional overlay directory (typically the Railway persistent volume).
+   * When present, any *.yaml here is loaded INSTEAD of the bundled file
+   * with the same name. Lets operators edit tours.yaml at runtime without
+   * a redeploy.
+   */
+  overlayDir?: string;
+}
+
+export function loadConfig(configDir: string, opts: LoadConfigOpts = {}): AppConfig {
+  const resolve = (name: string): string => {
+    if (opts.overlayDir) {
+      const overlayed = path.join(opts.overlayDir, name);
+      if (fs.existsSync(overlayed)) return overlayed;
+    }
+    return path.join(configDir, name);
+  };
   return {
-    groups: readYaml(p('groups.yaml'), GroupsConfigSchema),
-    tours: readYaml(p('tours.yaml'), ToursConfigSchema),
-    templates: readYaml(p('templates.yaml'), TemplatesConfigSchema),
-    allowlist: readYaml(p('allowlist.yaml'), AllowlistConfigSchema),
-    settings: readYaml(p('settings.yaml'), SettingsConfigSchema),
+    groups: readYaml(resolve('groups.yaml'), GroupsConfigSchema),
+    tours: readYaml(resolve('tours.yaml'), ToursConfigSchema),
+    templates: readYaml(resolve('templates.yaml'), TemplatesConfigSchema),
+    allowlist: readYaml(resolve('allowlist.yaml'), AllowlistConfigSchema),
+    settings: readYaml(resolve('settings.yaml'), SettingsConfigSchema),
   };
 }

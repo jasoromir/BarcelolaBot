@@ -24,10 +24,21 @@ export interface UpdateParticipantsResult {
   error?: string;
 }
 
+export interface WixService {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  location?: string;
+  hidden: boolean;
+  type: string;
+}
+
 export interface WixClient {
   getToursForDate(date: string): Promise<Tour[]>;
   cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult>;
   updateNumberOfParticipants(
     input: UpdateParticipantsInput,
   ): Promise<UpdateParticipantsResult>;
+  listServices(): Promise<WixService[]>;
 }

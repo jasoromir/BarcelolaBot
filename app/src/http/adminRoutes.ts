@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import yaml from 'js-yaml';
 import type { App } from '../app.js';
 import { createAuth } from './auth.js';
 import { runNightlyJob } from '../jobs/nightlyJob.js';
@@ -368,6 +369,71 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       }));
 
       res.json({ total: analysis.length, messages: analysis });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Seed or refresh tours.yaml from Wix. Writes to the persistent volume
+  // overlay so subsequent redeploys pick up the changes. Preserves any
+  // hand-curated Hebrew copy already present for a service_id.
+  exp.post('/admin/api/tours/sync-from-wix', async (req, res) => {
+    try {
+      const dryRun = Boolean(req.body?.dry_run);
+      const services = await app.wix.listServices();
+      const existing = app.config.tours.tours;
+      const merged: Record<
+        string,
+        {
+          name_he: string;
+          emoji: string;
+          description_he: string;
+          meeting_point_he: string;
+          google_maps_url?: string;
+        }
+      > = {};
+      for (const s of services) {
+        if (s.hidden) continue;
+        const prev = existing[s.id];
+        merged[s.id] = {
+          name_he: prev?.name_he || s.name || 'סיור',
+          emoji: prev?.emoji || '🌻',
+          description_he: prev?.description_he || s.description || '',
+          meeting_point_he: prev?.meeting_point_he || s.location || '',
+          ...(prev?.google_maps_url ? { google_maps_url: prev.google_maps_url } : {}),
+        };
+      }
+      // Carry forward entries that exist locally but weren't returned by Wix
+      // (in case Wix is paging oddly, or service is temporarily filtered out
+      // — we never want to silently drop hand-curated content).
+      for (const [id, entry] of Object.entries(existing)) {
+        if (!merged[id]) merged[id] = entry;
+      }
+
+      const yamlBody = yaml.dump({ tours: merged }, { sortKeys: false, lineWidth: 200 });
+
+      if (dryRun) {
+        res.json({
+          ok: true,
+          dry_run: true,
+          services_count: services.length,
+          merged_count: Object.keys(merged).length,
+          preview: yamlBody,
+        });
+        return;
+      }
+
+      const overlayDir = path.join(path.resolve(process.env.DATA_DIR ?? './data'), 'config');
+      if (!fs.existsSync(overlayDir)) fs.mkdirSync(overlayDir, { recursive: true });
+      const target = path.join(overlayDir, 'tours.yaml');
+      fs.writeFileSync(target, yamlBody, 'utf8');
+      app.reloadConfig();
+      res.json({
+        ok: true,
+        services_count: services.length,
+        merged_count: Object.keys(merged).length,
+        path: target,
+      });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

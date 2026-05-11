@@ -45,6 +45,8 @@ async function main(): Promise<void> {
   const logDir = path.join(dataDir, 'logs');
   const dbPath = path.join(dataDir, 'wabot.sqlite');
   const configDir = path.resolve(process.cwd(), 'config');
+  const configOverlayDir = path.join(dataDir, 'config');
+  if (!fs.existsSync(configOverlayDir)) fs.mkdirSync(configOverlayDir, { recursive: true });
   const webDir = path.resolve(process.cwd(), 'web');
 
   const db = openDatabase(dbPath);
@@ -70,7 +72,7 @@ async function main(): Promise<void> {
     });
   }
 
-  let config = loadConfig(configDir);
+  let config = loadConfig(configDir, { overlayDir: configOverlayDir });
 
   const whatsapp = createWhatsAppClient({
     sessionDir,
@@ -124,7 +126,7 @@ async function main(): Promise<void> {
     db,
     config,
     reloadConfig: () => {
-      config = loadConfig(configDir);
+      config = loadConfig(configDir, { overlayDir: configOverlayDir });
       logger.info({
         source: 'startup',
         eventType: 'config_reloaded',

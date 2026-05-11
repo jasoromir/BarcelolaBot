@@ -365,9 +365,34 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   }
 
   async function downloadStickerBytes(messageId: string): Promise<{ data: string; mimetype: string } | null> {
-    // Pull the raw sticker bytes directly from whatsapp-web.js's Chromium page
-    // by URL-fetching the sticker from WhatsApp's media CDN. This bypasses the
-    // JS Store's media-key flow that returns null for outbound stickers.
+    // Try the simple path first: the whatsapp-web.js wrapper's downloadMedia
+    // on the Message object. It kicks off key resolution + decrypt internally.
+    try {
+      const msg: any = await client.getMessageById(messageId);
+      if (!msg) {
+        console.log(`[wa:downloadStickerBytes] message not found`);
+        return null;
+      }
+      console.log(
+        `[wa:downloadStickerBytes] msg type=${msg.type} hasMedia=${msg.hasMedia} fromMe=${msg.fromMe}`,
+      );
+      const media = await Promise.race([
+        msg.downloadMedia(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 25_000)),
+      ]);
+      if (media && typeof media === 'object' && (media as any).data) {
+        const m = media as any;
+        console.log(
+          `[wa:downloadStickerBytes] wrapper path ok mimetype=${m.mimetype} dataLen=${(m.data || '').length}`,
+        );
+        return { data: m.data, mimetype: m.mimetype || 'image/webp' };
+      }
+      console.log(`[wa:downloadStickerBytes] wrapper path returned null, trying page.evaluate`);
+    } catch (err) {
+      console.log(`[wa:downloadStickerBytes] wrapper path threw: ${(err as Error).message}`);
+    }
+
+    // Fallback: reach into the page Store directly via page.evaluate.
     const page = (client as any).pupPage;
     if (!page) return null;
     const result = await page.evaluate(async (id: string) => {
@@ -390,7 +415,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       }
     }, messageId);
     if (!result || (result as any).error) {
-      console.log(`[wa:downloadStickerBytes] failed: ${(result as any)?.error}`);
+      console.log(`[wa:downloadStickerBytes] page.evaluate failed: ${(result as any)?.error}`);
       return null;
     }
     return result as { data: string; mimetype: string };

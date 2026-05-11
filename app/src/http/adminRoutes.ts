@@ -439,6 +439,32 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
+  // Send an arbitrary text body to a chat (group or DM). Handy for ad-hoc
+  // announcements + scripted test sequences run from the CLI.
+  exp.post('/admin/api/send', async (req, res) => {
+    try {
+      const chatId = req.body?.chat_id as string | undefined;
+      const body = req.body?.body as string | undefined;
+      if (!chatId || !body) {
+        res.status(400).json({ error: 'chat_id and body required' });
+        return;
+      }
+      let result;
+      if (chatId.endsWith('@g.us')) {
+        result = await app.whatsapp.sendToGroup(chatId, body);
+      } else {
+        // Accept @c.us jids or raw +E.164.
+        const phone = chatId.endsWith('@c.us')
+          ? `+${chatId.replace(/@c\.us$/, '')}`
+          : chatId;
+        result = await app.whatsapp.sendDirect(phone, body);
+      }
+      res.json({ ok: true, result });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Patch one or more tours in the overlay tours.yaml. Body: { tours: {
   // "<service_id>": { name_he?, emoji?, description_he?, meeting_point_he?,
   //                   google_maps_url? } } }

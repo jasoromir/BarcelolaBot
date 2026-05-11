@@ -30,13 +30,19 @@ export function buildBroadcastMessage(input: BroadcastInput): string {
   const sorted = [...input.tours].sort((a, b) => a.startTime.localeCompare(b.startTime));
   for (const t of sorted) {
     const cfg = input.toursConfig.tours[t.id];
-    if (!cfg) continue;
+    // Fallback to Wix-provided data when the service_id isn't in tours.yaml
+    // yet. Guides can still read the broadcast; we just lose the emoji and
+    // the human-written description/meeting point for that tour.
+    const emoji = cfg?.emoji ?? '🌻';
+    const nameHe = cfg?.name_he ?? t.tourTitle ?? 'סיור';
+    const descriptionHe = cfg?.description_he?.trim() ?? '';
+    const meetingPointHe = cfg?.meeting_point_he ?? t.location ?? '';
     const block = interpolate(input.templates.tour_block, {
-      emoji: cfg.emoji,
+      emoji,
       time_range: `${t.startTime}-${t.endTime}`,
-      name_he: cfg.name_he,
-      description_he: cfg.description_he.trim(),
-      meeting_point_he: cfg.meeting_point_he,
+      name_he: nameHe,
+      description_he: descriptionHe,
+      meeting_point_he: meetingPointHe,
     });
     parts.push(block);
   }

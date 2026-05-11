@@ -64,9 +64,9 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
 
       const date = tomorrowDateString(now, input.config.settings.timezone);
       const tours = await input.wix.getToursForDate(date);
-      const eligible = tours.filter(
-        (t) => t.bookingCount >= input.config.settings.min_bookings_to_run,
-      );
+      // Nightly is promotional — list every tour that exists tomorrow,
+      // including ones with zero bookings so people can still sign up.
+      const eligible = tours;
       const targets = resolveTargets(input.config);
 
       const message = buildBroadcastMessage({

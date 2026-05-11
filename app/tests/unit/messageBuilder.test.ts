@@ -52,19 +52,29 @@ describe('buildBroadcastMessage', () => {
     expect(out).toContain('FOOTER');
   });
 
-  it('skips tours with no config entry', () => {
+  it('still renders tours without a config entry using Wix-provided title', () => {
     const out = buildBroadcastMessage({
       kind: 'night',
       date: '2026-04-26',
       tours: [
-        { id: 'unknown-tour', date: '2026-04-26', startTime: '10:30', endTime: '13:30', bookingCount: 3 },
+        {
+          id: 'unknown-tour',
+          date: '2026-04-26',
+          startTime: '10:30',
+          endTime: '13:30',
+          bookingCount: 3,
+          tourTitle: 'Gothic Quarter Tour',
+          location: 'Plaça Catalunya',
+        },
       ],
       toursConfig: tours,
       templates,
     });
     expect(out).toContain('NIGHT');
     expect(out).toContain('FOOTER');
-    expect(out).not.toContain('10:30-13:30');
+    expect(out).toContain('10:30-13:30');
+    expect(out).toContain('Gothic Quarter Tour');
+    expect(out).toContain('Plaça Catalunya');
   });
 });
 

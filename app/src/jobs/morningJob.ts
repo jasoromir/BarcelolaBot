@@ -93,9 +93,29 @@ export async function runMorningJob(input: MorningJobInput): Promise<JobOutcome>
       }
 
       const tours = await input.wix.getToursForDate(date);
-      const eligible = tours.filter(
-        (t) => t.bookingCount >= input.config.settings.min_bookings_to_run,
-      );
+      // Morning broadcast: only show tours that actually have attendees.
+      // Nightly is promotional (list everything), but morning would be
+      // misleading if it advertised empty tours that aren't actually
+      // happening today.
+      const eligible = tours.filter((t) => t.bookingCount > 0);
+
+      // If NO tours today have any attendees, skip the broadcast entirely —
+      // sending a "tomorrow's tours:" message with an empty body is noise.
+      if (eligible.length === 0) {
+        input.logger.info({
+          source: 'jobs',
+          eventType: 'morning_no_tours',
+          message: 'no tours with attendees today; skipping morning broadcast',
+          metadata: { date, toursFetched: tours.length },
+        });
+        return {
+          status: 'skipped',
+          toursCount: 0,
+          groupsSent: 0,
+          groupsClosed: groupsOpened,
+          metadata: { date, toursFetched: tours.length, reason: 'no_attended_tours' },
+        };
+      }
 
       const message = buildBroadcastMessage({
         kind: 'morning',

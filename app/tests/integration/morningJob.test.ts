@@ -86,7 +86,7 @@ describe('runMorningJob', () => {
     expect(client.sendToGroup).toHaveBeenCalledWith('test@g.us', expect.stringContaining('MORNING'));
   });
 
-  it('opens groups even when 0 tours', async () => {
+  it('opens groups but skips broadcast when no tours have attendees', async () => {
     const { history, logger } = freshInfra();
     const client = fakeClient();
     const result = await runMorningJob({
@@ -99,7 +99,7 @@ describe('runMorningJob', () => {
       dryRun: false,
       now: () => new Date('2026-04-26T07:30:00Z'),
     });
-    expect(result.status).toBe('success');
+    expect(result.status).toBe('skipped');
     expect(client.setGroupMessagesAdminsOnly).toHaveBeenCalledWith('test@g.us', false);
     expect(client.sendToGroup).not.toHaveBeenCalled();
   });

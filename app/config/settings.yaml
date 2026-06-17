@@ -21,3 +21,10 @@ reminders:
   classifier_confidence_threshold: 0.7
   default_google_maps_url: "https://maps.app.goo.gl/3nbsJJytm6HnDGXL8"
   reply_debounce_seconds: 120
+notifications:
+  enabled: true
+  email_to: "jason.pruebas@gmail.com"   # out-of-band alert recipient (NOT WhatsApp)
+  reactive_after_minutes: 30            # alert once the link has been down this long
+  proactive_warn_after_days: 12         # warn to re-link before the ~14d expiry window
+  # Requires RESEND_API_KEY env var on the host. Defaults to Resend's sandbox
+  # sender; set email_from to a verified-domain address for production.

@@ -87,6 +87,19 @@ export function startScheduler(app: App): ScheduledTasks {
         message: `wa=${state.kind} disconnectedForMinutes=${elapsedMinutes}`,
         metadata: { status: state.kind, disconnectedForMinutes: elapsedMinutes },
       });
+
+      // Drive out-of-band email alerts (reactive disconnect + proactive re-link).
+      // Same 15-min cadence as the health check; the monitor owns its thresholds
+      // and dedup, so calling every tick is safe.
+      if (app.sessionMonitor) {
+        app.sessionMonitor.tick().catch((err) => {
+          app.logger.error({
+            source: 'scheduler',
+            eventType: 'session_monitor_tick_failed',
+            message: (err as Error).message,
+          });
+        });
+      }
     },
     { timezone: tz },
   );

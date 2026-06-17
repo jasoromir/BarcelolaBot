@@ -87,5 +87,14 @@ export const SettingsConfigSchema = z.object({
     default_google_maps_url: z.string().url().optional(),
     reply_debounce_seconds: z.number().int().nonnegative(),
   }),
+  notifications: z
+    .object({
+      enabled: z.boolean(),
+      email_to: z.string().email(),
+      email_from: z.string().min(1).optional(),
+      reactive_after_minutes: z.number().int().positive(),
+      proactive_warn_after_days: z.number().positive(),
+    })
+    .optional(),
 });
 export type SettingsConfig = z.infer<typeof SettingsConfigSchema>;

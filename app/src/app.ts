@@ -15,6 +15,7 @@ import type { WorkerForwardsStore } from './persistence/workerForwards.js';
 import type { ReminderRunner } from './reminders/runner.js';
 import type { Classifier } from './reminders/classifier.js';
 import type { IncomingDm } from './whatsapp/types.js';
+import type { SessionMonitor } from './notify/sessionMonitor.js';
 
 export interface App {
   db: DB;
@@ -36,6 +37,8 @@ export interface App {
   dmSender: DirectMessageSender;
   logger: AppLogger;
   reminderRunner: ReminderRunner;
+  /** Watches the WhatsApp link and emails out-of-band alerts. Null if notifications disabled. */
+  sessionMonitor: SessionMonitor | null;
   /** Exposed so admin /simulate-reply can inject synthetic DMs. Null if reminders disabled. */
   replyHandler: ((dm: IncomingDm) => Promise<void>) | null;
   /** Exposed so admin /classify can call it directly. Null if reminders disabled. */

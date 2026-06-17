@@ -1,5 +1,21 @@
 # WhatsApp Bot Operations Guide
 
+> ## 🚦 START HERE — required next steps (as of 2026-06-16)
+>
+> **The bot is deployed on Railway** (`barcelola-whatsapp-bot`, prod URL `https://barcelola-whatsapp-bot-production.up.railway.app`). Most of this guide describes running locally; the production instance runs on Railway. If the bot "isn't working", it's almost always that the **WhatsApp link dropped and needs a fresh QR scan** (happens every few weeks — this is normal, NOT a ban).
+>
+> **Do these, in order:**
+> 1. **Check state:** `curl https://barcelola-whatsapp-bot-production.up.railway.app/healthz`. If `"wa":"connected"` → you're fine. If `"qr_pending"`/`"disconnected"` → continue.
+> 2. **Re-link (needs the phone):** `railway logs --service barcelola-whatsapp-bot` to see the QR (or open `/admin` on the prod URL), then phone → WhatsApp → Settings → Linked Devices → Link a device → scan. Re-check `/healthz` for `"connected"`. **Session files cannot reconnect it — only a fresh scan works.**
+> 3. **Enable email alerts (one-time):** set `RESEND_API_KEY` so you get warned next time instead of finding out weeks later:
+>    ```bash
+>    railway variables --set RESEND_API_KEY=re_xxxxx --service barcelola-whatsapp-bot
+>    ```
+>    Sign up free at resend.com. **Use jason.pruebas@gmail.com as the account email** (Resend's sandbox sender only delivers to the account owner) — that's the configured alert recipient in `config/settings.yaml`.
+> 4. **Deploy latest code** if the email-alert feature isn't live yet: push to GitHub (auto-deploys) or `railway up`.
+>
+> Full detail: see `HANDOFF.md` → "REQUIRED NEXT STEPS" and "Re-link reminder system".
+
 ## Quick Reference
 
 ```bash
@@ -170,10 +186,14 @@ npx tsx src/index.ts
 - Run `npm install` to ensure dependencies are up to date
 
 ### Problem: WhatsApp account banned
-- **Stop using the bot immediately**
-- Use the account normally (manual WhatsApp) for 1-2 weeks
-- The bot uses a **personal** account now (not business)
-- Running headless mode with saved session should prevent bans
+- **This is no longer expected to happen.** The original ban was while the number was on a WhatsApp **Business** account. The same number was migrated to a **personal** account and the ban issue has not recurred. We are not worried about bans for now.
+- Don't confuse a ban with the routine **server-side logout** (see next entry) — that's what usually causes "the bot stopped working", and the fix is just a re-link, not a cooldown.
+- If a real ban ever does occur: stop the bot, use the account manually for 1–2 weeks, then re-link.
+
+### Problem: Bot was working, then silently stopped (server-side logout)
+This is the common one. WhatsApp unlinks the device periodically (when the primary phone has been offline ~14 days, sometimes sooner for hosted sessions). The container keeps running and healthy; only the WhatsApp link dies, so `/healthz` shows `"wa":"qr_pending"`.
+- **Fix:** re-link with a fresh QR scan (see START HERE banner at the top). Saved session files can't fix it.
+- **Prevention:** you can't fully prevent it — instead the bot now **emails jason.pruebas@gmail.com** when it disconnects (reactive) and ~2 days before the expiry window (proactive). Make sure `RESEND_API_KEY` is set so those alerts actually send.
 
 ---
 
@@ -230,19 +250,21 @@ BarcelolaBot/app/
 
 ## 9. Ban Prevention Rules
 
+**Ban status: resolved.** The original ban was tied to the WhatsApp **Business** account. The number is now on a **personal** account and bans have not recurred, so the strict residential-IP-only rules are downgraded to light hygiene. (Running on Railway's datacenter IP is fine in practice — see Production Considerations.)
+
 ✅ **DO:**
-- Use **personal** WhatsApp account (not business)
-- Let bot run continuously (don't restart frequently)
+- Keep the number on a **personal** WhatsApp account (not Business)
+- Let the bot run continuously
 - Keep session files (in `data/session/`)
 - Use headless mode (default)
-- Test in test group first
+- Test in the test group first
+
+🟡 **Light hygiene (not hard rules anymore):**
+- Avoid scanning the QR many times in rapid succession
+- Don't delete session files unnecessarily
 
 ❌ **DON'T:**
-- Scan QR multiple times
-- Restart bot repeatedly
-- Delete session files unnecessarily
-- Run on datacenter/cloud IPs (use laptop only)
-- Use business account
+- Switch the number back to a WhatsApp Business account
 
 ---
 
@@ -330,16 +352,15 @@ node -e "console.log(require('bcrypt').hashSync('YOUR_PASSWORD', 10))"
 
 ## 13. Production Considerations
 
-**Current setup:** Development mode on laptop
+**Current setup:** Deployed on **Railway** (`barcelola-whatsapp-bot`). Railway handles always-on hosting, restart-on-crash, and a persistent volume at `/app/data` for the session + DB. Running on Railway's datacenter IP is fine now that the ban issue is resolved (it was a Business-account problem). The main operational task is periodic **re-linking** when WhatsApp logs the device out (~every few weeks) — the email alert system tells you when.
 
 **Before going to production:**
 - ✅ Test thoroughly in test group
 - ✅ Change `broadcast.mode` from `"test"` to `"production"` in `config/settings.yaml`
 - ✅ Add real group IDs to `config/groups.yaml`
 - ✅ Add guide assignment logic
-- ✅ Set up proper logging/monitoring
-- ⚠️ Consider running on dedicated always-on machine (not cloud!)
-- ⚠️ Set up automatic restart on crash (e.g., `pm2` or `systemd`)
+- ✅ Set `RESEND_API_KEY` on Railway so re-link email alerts send (recipient: jason.pruebas@gmail.com)
+- ✅ Set up proper logging/monitoring (email alerts on disconnect are now built in — see §6)
 
 ---
 
@@ -373,7 +394,7 @@ tail -f bot.log
 
 ---
 
-**Last Updated:** 2026-05-09
+**Last Updated:** 2026-06-16
 **Bot Version:** v0.1.0 (feat/redesign branch)
 
 ---
@@ -747,12 +768,13 @@ Available variables:
 
 For production, replace localtunnel with a permanent deployment:
 
-#### Railway (Recommended)
-1. Push code to GitHub
-2. Connect Railway to your repo
-3. Set environment variables (from `.env`)
-4. Railway gives you a permanent URL: `https://your-app.railway.app`
-5. Update Wix webhook URL to: `https://your-app.railway.app/webhook/wix`
+#### Railway — ✅ ALREADY DEPLOYED HERE
+This is the live host. Project `barcelola-whatsapp-bot`, prod URL `https://barcelola-whatsapp-bot-production.up.railway.app`.
+1. Code is connected via GitHub — push to deploy (or `railway up`).
+2. Environment variables are already set on the service. When adding new ones: `railway variables --set KEY=value --service barcelola-whatsapp-bot`. Notably `RESEND_API_KEY` must be set for re-link email alerts (recipient jason.pruebas@gmail.com).
+3. Session + DB persist on a volume at `/app/data` (`DATA_DIR=/app/data`), so redeploys don't wipe them.
+4. Wix webhook URL: `https://barcelola-whatsapp-bot-production.up.railway.app/webhook/wix`.
+5. To see the QR for re-linking: `railway logs --service barcelola-whatsapp-bot`.
 
 #### Fly.io
 1. Install flyctl: `brew install flyctl`
@@ -808,4 +830,4 @@ Before deploying to production:
 
 ---
 
-**Last Updated:** 2026-05-09
+**Last Updated:** 2026-06-16

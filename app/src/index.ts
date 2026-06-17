@@ -23,7 +23,10 @@ import { createWixClient } from './wix/client.js';
 import { DirectMessageSender } from './messaging/directMessage.js';
 import { createHttpServer } from './http/server.js';
 import { startScheduler } from './scheduler.js';
+import { createEmailer } from './notify/emailer.js';
+import { createSessionMonitor } from './notify/sessionMonitor.js';
 import type { App } from './app.js';
+import type { SessionMonitor } from './notify/sessionMonitor.js';
 
 function requireEnv(name: string, fallback?: string): string {
   const v = process.env[name];
@@ -122,6 +125,40 @@ async function main(): Promise<void> {
     isConnected: () => whatsapp.state().kind === 'connected',
   });
 
+  // Out-of-band alerting: email the operator when the WhatsApp link drops, and
+  // proactively before the session ages out. Email (not WhatsApp) is the channel
+  // precisely because WhatsApp is what goes down.
+  let sessionMonitor: SessionMonitor | null = null;
+  const notif = config.settings.notifications;
+  if (notif?.enabled) {
+    const emailer = createEmailer({
+      apiKey: process.env.RESEND_API_KEY,
+      to: notif.email_to,
+      from: notif.email_from,
+      logger,
+    });
+    if (!emailer.enabled) {
+      logger.warn({
+        source: 'startup',
+        eventType: 'notifications_unconfigured',
+        message: 'notifications enabled but RESEND_API_KEY not set; alerts will be logged, not emailed',
+      });
+    }
+    sessionMonitor = createSessionMonitor({
+      whatsapp,
+      emailer,
+      store: controlStateStore,
+      logger,
+      settings: {
+        reactiveAfterMinutes: notif.reactive_after_minutes,
+        proactiveWarnAfterDays: notif.proactive_warn_after_days,
+        adminUrl: process.env.RAILWAY_PUBLIC_DOMAIN
+          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+          : undefined,
+      },
+    });
+  }
+
   const app: App = {
     db,
     config,
@@ -148,6 +185,7 @@ async function main(): Promise<void> {
     dmSender,
     logger,
     reminderRunner,
+    sessionMonitor,
     replyHandler: null,
     classifier: null,
     lastQrDataUrl: null,

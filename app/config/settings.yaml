@@ -23,7 +23,7 @@ reminders:
   reply_debounce_seconds: 120
 notifications:
   enabled: true
-  email_to: "jason.pruebas@gmail.com"   # out-of-band alert recipient (NOT WhatsApp)
+  email_to: "jason.omedes@gmail.com"    # must match the Resend account owner (sandbox sender limitation)
   reactive_after_minutes: 30            # alert once the link has been down this long
   proactive_warn_after_days: 12         # warn to re-link before the ~14d expiry window
   # Requires RESEND_API_KEY env var on the host. Defaults to Resend's sandbox

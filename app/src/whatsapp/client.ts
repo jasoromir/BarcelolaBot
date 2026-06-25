@@ -77,29 +77,53 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     const dataUrl = await QRCode.toDataURL(qr);
     opts.onQr?.(dataUrl);
     setState({ kind: 'qr_pending', qrDataUrl: dataUrl });
+    // A QR event means the session is dead — stop any reconnect loop.
+    if (!reconnectGaveUp) cancelReconnect('qr event received — session needs fresh scan');
   });
   client.on('ready', () => {
     const phone = client.info?.wid?.user ? `+${client.info.wid.user}` : 'unknown';
     reconnectAttempt = 0;
+    reconnectGaveUp = false;
     setState({ kind: 'connected', phone });
   });
 
   // Auto-reconnect with bounded exponential backoff. WhatsApp-web drops the
   // session occasionally (network blips, server restarts, Chromium hiccups);
   // without this the bot stays disconnected until somebody hits /admin.
-  // Backoff: 30s → 2m → 5m → 5m forever. Caller can disable by setting
-  // PUPPETEER_AUTO_RECONNECT=false.
+  // Backoff: 30s → 2m → 5m, max 10 attempts. After that, or once a QR event
+  // fires (meaning the session is dead and needs a fresh scan), give up —
+  // retrying further just exhausts container resources (EAGAIN).
   const reconnectDelaysMs = [30_000, 120_000, 300_000];
+  const MAX_RECONNECT_ATTEMPTS = 10;
   let reconnectAttempt = 0;
   let reconnectTimer: NodeJS.Timeout | null = null;
+  let reconnectGaveUp = false;
   const autoReconnectEnabled = process.env.PUPPETEER_AUTO_RECONNECT !== 'false';
+
+  const cancelReconnect = (reason: string) => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnectGaveUp = true;
+    console.log(`[wa:reconnect] gave up (${reason})`);
+  };
 
   const scheduleReconnect = (reason: string) => {
     if (!autoReconnectEnabled) return;
     if (reconnectTimer) return; // already scheduled
+    if (reconnectGaveUp) return; // already gave up
+    if (current.kind === 'qr_pending') {
+      cancelReconnect('qr_pending — session dead, needs fresh scan');
+      return;
+    }
+    if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      cancelReconnect(`max attempts (${MAX_RECONNECT_ATTEMPTS}) reached`);
+      return;
+    }
     const idx = Math.min(reconnectAttempt, reconnectDelaysMs.length - 1);
     const delay = reconnectDelaysMs[idx]!;
-    console.log(`[wa:reconnect] scheduling in ${delay}ms (attempt ${reconnectAttempt + 1}, reason=${reason})`);
+    console.log(`[wa:reconnect] scheduling in ${delay}ms (attempt ${reconnectAttempt + 1}/${MAX_RECONNECT_ATTEMPTS}, reason=${reason})`);
     reconnectTimer = setTimeout(async () => {
       reconnectTimer = null;
       reconnectAttempt += 1;

@@ -292,6 +292,22 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       isUpdate: wasAlreadyConfirmed,
     });
     await safeSend(deps, reminder.phone, ack, wasAlreadyConfirmed ? 'confirmation_update_ack' : 'confirmation_ack');
+
+    // If the customer also asked a question alongside their confirmation,
+    // forward to the worker group so it doesn't get silently dropped.
+    // Detection: message contains "?" or common Hebrew question words.
+    const hasQuestion =
+      dm.body.includes('?') ||
+      /איפה|מתי|מה |איך|כמה|מי |האם|האם|אפשר/.test(dm.body);
+    if (hasQuestion) {
+      await forwardToWorker(deps, reminder, dm, 'confirm_with_question');
+      deps.logger.info({
+        source: 'reply',
+        eventType: 'confirm_with_question_forwarded',
+        message: `confirmed ${reminder.bookingId} and forwarded question to worker`,
+      });
+    }
+
     deps.audit.record({
       ts: nowIso,
       phone,
@@ -300,8 +316,8 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       intent: cls.intent,
       participantCount: cls.participantCount,
       confidence: cls.confidence,
-      forwarded: false,
-      notes: wixUpdateNote ?? (wasAlreadyConfirmed ? 'count_changed' : null),
+      forwarded: hasQuestion,
+      notes: wixUpdateNote ?? (hasQuestion ? 'confirm_with_question' : null) ?? (wasAlreadyConfirmed ? 'count_changed' : null),
     });
     deps.logger.info({
       source: 'reply',

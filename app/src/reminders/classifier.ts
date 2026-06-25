@@ -51,12 +51,14 @@ Output STRICT JSON matching this schema, nothing else:
 {"intent": "confirm" | "cancel" | "update_count" | "other", "participant_count": number | null, "confidence": number}
 
 Rules:
-- "confirm": customer says they are coming / attending. Examples in Hebrew: מאשר, מגיע, מגיעים, נגיע, בא, באים, רואים אותך, אישור, ok, yes, כן. They may also include a number — if the number differs from current_count, still use intent="confirm" AND set participant_count.
+- "confirm": customer says they are coming / attending. Examples in Hebrew: מאשר, מאשרת, מגיע, מגיעים, נגיע, בא, באים, רואים אותך, אישור, ok, yes, כן. They may also include a question or additional text — STILL classify as "confirm" if the confirmation intent is present, even alongside a question. A message like "מאשרת, איפה הפריימרק?" is a confirm. Confidence should be high (>=0.85) when the confirm word is unambiguous even if extra text is present.
 - "cancel": customer says they cannot come / wants to cancel. Examples: מבטל, לא נוכל, לא יכול, בוטל, ביטול, לא מגיע, cancel, no. If they offer an excuse ("סליחה לא אוכל") still classify as cancel.
 - "update_count": customer provides ONLY a new participant count without confirming or cancelling (e.g. "3", "נהיינו 4", "אנחנו 2 אנשים"). If in doubt between update_count and confirm, prefer confirm.
-- "other": anything else — questions, greetings, small talk, complaints, language the other three categories don't fit.
+- "other": anything else — questions with no booking intent, greetings, small talk, complaints.
 
-confidence is 0..1. If ambiguous or the message mixes topics, lower the confidence. If confidence < 0.7 caller may forward to a human.
+IMPORTANT: Mixed messages where the customer BOTH confirms AND asks a question → always classify as "confirm" with high confidence. The question part is handled separately by the caller.
+
+confidence is 0..1. Only lower confidence when the booking intent itself is genuinely ambiguous (not just because the message has extra content).
 
 participant_count: extract the integer count only when clearly stated by the user. null otherwise. Ignore phone numbers, street numbers, dates, times.`;
 

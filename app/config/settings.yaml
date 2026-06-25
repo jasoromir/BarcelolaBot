@@ -21,7 +21,7 @@ reminders:
   worker_group_id: "120363425214664727@g.us"  # BARCELOLA BOT group
   classifier_confidence_threshold: 0.7
   default_google_maps_url: "https://maps.app.goo.gl/3nbsJJytm6HnDGXL8"
-  reply_debounce_seconds: 120
+  reply_debounce_seconds: 15
 notifications:
   enabled: true
   email_to: "jason.omedes@gmail.com"    # must match the Resend account owner (sandbox sender limitation)

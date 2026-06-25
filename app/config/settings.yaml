@@ -12,8 +12,9 @@ retry:
   backoff_ms: [60000, 300000, 900000]
 reminders:
   enabled: true
-  lead_time_hours: 24
-  combine_threshold_hours: 24
+  lead_time_hours: 24            # fallback if reminder_send_time not set
+  reminder_send_time: "10:00"    # send reminder at 10:00 AM (Europe/Madrid) the day before the tour
+  combine_threshold_hours: 24    # if tour starts within 24h of booking, combine confirmation+reminder
   no_reply_alert_minutes_before: 120
   poll_interval_seconds: 30
   official_contact_number: "+34623964800"

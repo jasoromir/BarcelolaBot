@@ -78,6 +78,9 @@ export const SettingsConfigSchema = z.object({
   reminders: z.object({
     enabled: z.boolean(),
     lead_time_hours: z.number().positive(),
+    // Fixed clock time (HH:MM, 24h, local timezone) at which to send the
+    // reminder on the day before the tour. Takes precedence over lead_time_hours.
+    reminder_send_time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
     combine_threshold_hours: z.number().positive(),
     no_reply_alert_minutes_before: z.number().int().positive(),
     poll_interval_seconds: z.number().int().positive(),

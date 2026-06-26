@@ -125,7 +125,9 @@ export function parseBookingWebhook(payload: unknown): ParseResult {
     return {
       ok: true,
       event: {
-        bookingId: d.order_id,
+        // booking_id is the real Wix booking ID used by the Bookings API.
+        // order_id is the eCommerce order ID — different namespace, useless for cancel/update.
+        bookingId: d.booking_id ?? d.order_id,
         tourId: d.service_id ?? '',
         tourTitle: d.service_name_main_language ?? d.service_name,
         phone: d.booking_contact_phone,

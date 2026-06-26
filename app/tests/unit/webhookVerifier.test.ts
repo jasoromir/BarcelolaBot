@@ -46,7 +46,8 @@ describe('parseBookingWebhook', () => {
     const result = parseBookingWebhook(wixNative);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.event.bookingId).toBe('ffc8aef7-ff1c-47ae-84e8-01e579e4147d');
+    // booking_id (the real Wix booking ID) takes precedence over order_id (eCommerce)
+    expect(result.event.bookingId).toBe('e23442f8-7d15-4add-82ec-46baeb353960');
     expect(result.event.phone).toBe('+34675319188');
     expect(result.event.tourId).toBe('d9807937-2c23-4f57-9eec-232ba2360f37');
     expect(result.event.tourTitle).toBe('המסע בעקבות גאודי והמודרניסטה');

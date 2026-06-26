@@ -21,6 +21,7 @@ export function startScheduler(app: App): ScheduledTasks {
         whatsapp: app.whatsapp,
         wix: app.wix,
         history: app.jobHistory,
+        reminders: app.reminders,
         logger: app.logger,
         isPaused: () => app.controlState.isPaused(),
         dryRun: false,

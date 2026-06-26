@@ -1,5 +1,6 @@
 import type { Tour, BookingEvent } from '../types.js';
 import type { ToursConfig, TemplatesConfig } from '../config/schemas.js';
+import type { ReminderRow } from '../persistence/reminders.js';
 
 const WEEKDAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
@@ -84,4 +85,71 @@ export function buildBookingConfirmation(input: BookingConfirmationInput): strin
     official_contact_number: input.officialContactNumber,
     anti_reply_footer: footer,
   });
+}
+
+export interface WorkerNightlySummaryInput {
+  date: string; // YYYY-MM-DD, the tour date (tomorrow)
+  tours: Tour[]; // from Wix (sorted by startTime)
+  reminders: ReminderRow[]; // from RemindersStore.forDate(date)
+  toursConfig: ToursConfig;
+}
+
+/**
+ * Builds a Hebrew internal summary for the Barcelola BOT worker group, sent
+ * alongside the nightly broadcast. Shows per-tour: confirmed, awaiting reply
+ * (with phone numbers), and cancelled.
+ */
+export function buildWorkerNightlySummary(input: WorkerNightlySummaryInput): string {
+  const { date, tours, reminders, toursConfig } = input;
+  const day = weekdayHe(date);
+  const [y, m, d] = date.split('-');
+  const dateFmt = `${d}/${m}/${String(y).slice(2)}`;
+
+  const lines: string[] = [`📋 *סיכום מחר — יום ${day} ${dateFmt}*`];
+
+  if (tours.length === 0) {
+    lines.push('אין סיורים מחר.');
+    return lines.join('\n');
+  }
+
+  for (const tour of tours) {
+    const cfg = toursConfig.tours[tour.id];
+    const name = cfg?.name_he ?? tour.tourTitle ?? tour.id;
+    const emoji = cfg?.emoji ?? '🌻';
+
+    // Bucket this tour's reminders by status
+    const tourReminders = reminders.filter((r) => r.tourId === tour.id);
+    const confirmed = tourReminders.filter((r) => r.status === 'confirmed');
+    const awaiting = tourReminders.filter(
+      (r) => r.status === 'awaiting_reply' || r.status === 'awaiting_send',
+    );
+    const cancelled = tourReminders.filter((r) => r.status === 'cancelled');
+
+    lines.push('');
+    lines.push(`${emoji} *${name}* — ${tour.startTime}`);
+
+    if (confirmed.length > 0) {
+      const names = confirmed.map((r) => r.clientName ?? r.phone).join(', ');
+      lines.push(`✅ מאשרים (${confirmed.length}): ${names}`);
+    } else {
+      lines.push(`✅ מאשרים: אין`);
+    }
+
+    if (awaiting.length > 0) {
+      lines.push(`⏳ ממתינים לתשובה (${awaiting.length}):`);
+      for (const r of awaiting) {
+        const name = r.clientName ?? 'לא ידוע';
+        lines.push(`   • ${name} — ${r.phone}`);
+      }
+    } else {
+      lines.push(`⏳ ממתינים לתשובה: אין`);
+    }
+
+    if (cancelled.length > 0) {
+      const names = cancelled.map((r) => r.clientName ?? r.phone).join(', ');
+      lines.push(`❌ ביטולים (${cancelled.length}): ${names}`);
+    }
+  }
+
+  return lines.join('\n');
 }

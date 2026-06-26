@@ -4,9 +4,10 @@ import type { JobHistory } from '../persistence/jobHistory.js';
 import type { AppLogger } from '../log/logger.js';
 import type { AppConfig } from '../config/loader.js';
 import type { JobOutcome } from '../types.js';
+import type { RemindersStore } from '../persistence/reminders.js';
 import { GroupAdminService } from '../whatsapp/groupAdmin.js';
 import { Broadcaster } from '../messaging/broadcaster.js';
-import { buildBroadcastMessage } from '../messaging/builder.js';
+import { buildBroadcastMessage, buildWorkerNightlySummary } from '../messaging/builder.js';
 import { runJob } from './runner.js';
 
 export interface NightlyJobInput {
@@ -15,6 +16,7 @@ export interface NightlyJobInput {
   wix: WixClient;
   history: JobHistory;
   logger: AppLogger;
+  reminders: RemindersStore;
   isPaused: () => boolean;
   dryRun: boolean;
   now?: () => Date;
@@ -127,6 +129,33 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
             metadata: { groupId: id },
           });
         }
+      }
+
+      // Send the internal worker summary to the Barcelola BOT group.
+      // This runs after the broadcast so the group gets both messages.
+      // Failures here are non-fatal — logged and swallowed.
+      const workerGroupId = input.config.settings.reminders.worker_group_id;
+      try {
+        const reminderRows = input.reminders.forDate(date);
+        const summary = buildWorkerNightlySummary({
+          date,
+          tours,
+          reminders: reminderRows,
+          toursConfig: input.config.tours,
+        });
+        await input.whatsapp.sendToGroup(workerGroupId, summary);
+        input.logger.info({
+          source: 'jobs',
+          eventType: 'nightly_worker_summary_sent',
+          message: `worker summary sent for ${date}`,
+          metadata: { date, remindersFound: reminderRows.length },
+        });
+      } catch (err) {
+        input.logger.error({
+          source: 'jobs',
+          eventType: 'nightly_worker_summary_failed',
+          message: (err as Error).message,
+        });
       }
 
       const status = verified.notAdmin.length > 0 ? 'partial' : 'success';

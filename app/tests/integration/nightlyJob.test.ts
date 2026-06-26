@@ -4,6 +4,7 @@ import os from 'node:os';
 import { openDatabase } from '../../src/persistence/db.js';
 import { EventLog } from '../../src/persistence/eventLog.js';
 import { JobHistory } from '../../src/persistence/jobHistory.js';
+import { RemindersStore } from '../../src/persistence/reminders.js';
 import { createLogger } from '../../src/log/logger.js';
 import { runNightlyJob } from '../../src/jobs/nightlyJob.js';
 import type { WhatsAppClient, SendResult } from '../../src/whatsapp/types.js';
@@ -46,6 +47,17 @@ function fakeConfig(over?: Partial<AppConfig>): AppConfig {
       broadcast: { mode: 'test', test_group_id: 'test@g.us', inter_message_delay_ms: 0 },
       min_bookings_to_run: 1,
       retry: { max_attempts: 1, backoff_ms: [] },
+      reminders: {
+        enabled: true,
+        lead_time_hours: 24,
+        combine_threshold_hours: 24,
+        no_reply_alert_minutes_before: 120,
+        poll_interval_seconds: 30,
+        official_contact_number: '+34600000000',
+        worker_group_id: 'worker@g.us',
+        classifier_confidence_threshold: 0.7,
+        reply_debounce_seconds: 0,
+      },
     },
     ...over,
   };
@@ -55,17 +67,18 @@ function freshInfra() {
   const db = openDatabase(path.join(os.tmpdir(), `wabot-nj-${Date.now()}-${Math.random()}.sqlite`));
   const eventLog = new EventLog(db);
   const history = new JobHistory(db);
+  const reminders = new RemindersStore(db);
   const logger = createLogger({
     eventLog,
     logDir: path.join(os.tmpdir(), `wabot-nj-logs-${Date.now()}`),
     consoleLevel: 'silent',
   });
-  return { db, eventLog, history, logger };
+  return { db, eventLog, history, reminders, logger };
 }
 
 describe('runNightlyJob', () => {
   it('happy path: fetches tours, sends to test group, closes group', async () => {
-    const { history, logger } = freshInfra();
+    const { history, reminders, logger } = freshInfra();
     const client = fakeClient();
     const wix: WixClient = {
       getToursForDate: vi.fn(async () => [
@@ -77,6 +90,7 @@ describe('runNightlyJob', () => {
       whatsapp: client,
       wix,
       history,
+      reminders,
       logger,
       isPaused: () => false,
       dryRun: false,
@@ -91,12 +105,13 @@ describe('runNightlyJob', () => {
   });
 
   it('skips when paused', async () => {
-    const { history, logger } = freshInfra();
+    const { history, reminders, logger } = freshInfra();
     const result = await runNightlyJob({
       config: fakeConfig(),
       whatsapp: fakeClient(),
       wix: { getToursForDate: vi.fn(async () => []) },
       history,
+      reminders,
       logger,
       isPaused: () => true,
       dryRun: false,
@@ -106,13 +121,14 @@ describe('runNightlyJob', () => {
   });
 
   it('0 tours -> no broadcast, still closes groups', async () => {
-    const { history, logger } = freshInfra();
+    const { history, reminders, logger } = freshInfra();
     const client = fakeClient();
     const result = await runNightlyJob({
       config: fakeConfig(),
       whatsapp: client,
       wix: { getToursForDate: vi.fn(async () => []) },
       history,
+      reminders,
       logger,
       isPaused: () => false,
       dryRun: false,
@@ -121,11 +137,12 @@ describe('runNightlyJob', () => {
     expect(result.status).toBe('success');
     expect(result.groupsSent).toBe(0);
     expect(result.groupsClosed).toBe(1);
-    expect(client.sendToGroup).not.toHaveBeenCalled();
+    // The worker summary is still sent to the worker group even with 0 tours.
+    expect(client.sendToGroup).toHaveBeenCalledWith('worker@g.us', expect.stringContaining('אין סיורים'));
   });
 
   it('dryRun does not send or close', async () => {
-    const { history, logger } = freshInfra();
+    const { history, reminders, logger } = freshInfra();
     const client = fakeClient();
     const result = await runNightlyJob({
       config: fakeConfig(),
@@ -136,6 +153,7 @@ describe('runNightlyJob', () => {
         ]),
       },
       history,
+      reminders,
       logger,
       isPaused: () => false,
       dryRun: true,

@@ -97,6 +97,7 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       whatsapp: app.whatsapp,
       wix: app.wix,
       history: app.jobHistory,
+      reminders: app.reminders,
       logger: app.logger,
       isPaused: () => app.controlState.isPaused(),
       dryRun,

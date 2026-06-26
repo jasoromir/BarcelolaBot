@@ -210,6 +210,21 @@ export class RemindersStore {
       .all(fromIso, toIso) as DBRow[];
     return rows.map(rowToReminder);
   }
+
+  forDate(dateIso: string): ReminderRow[] {
+    // All reminders whose tour falls on dateIso (YYYY-MM-DD), any status.
+    // start_at_iso is stored as UTC ISO; a full-day UTC range covers all tours
+    // whose local date is dateIso (tours are in Europe/Madrid = UTC+1/+2, so
+    // they all fall well within the UTC day boundary).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM reminders
+         WHERE start_at_iso >= ? AND start_at_iso < ?
+         ORDER BY start_at_iso ASC, client_name ASC`,
+      )
+      .all(`${dateIso}T00:00:00.000Z`, `${dateIso}T23:59:59.999Z`) as DBRow[];
+    return rows.map(rowToReminder);
+  }
 }
 
 export interface ReplyAuditRow {

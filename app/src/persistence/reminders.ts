@@ -9,6 +9,8 @@ export type ReminderStatus =
 
 export interface ReminderRow {
   bookingId: string;
+  /** eCommerce order ID from Wix — used to look up deposit/balance at reminder send time. */
+  orderIdEcom: string | null;
   phone: string;
   clientName: string | null;
   tourId: string | null;
@@ -25,6 +27,7 @@ export interface ReminderRow {
 
 interface DBRow {
   booking_id: string;
+  order_id_ecom: string | null;
   phone: string;
   client_name: string | null;
   tour_id: string | null;
@@ -42,6 +45,7 @@ interface DBRow {
 function rowToReminder(r: DBRow): ReminderRow {
   return {
     bookingId: r.booking_id,
+    orderIdEcom: r.order_id_ecom,
     phone: r.phone,
     clientName: r.client_name,
     tourId: r.tour_id,
@@ -65,13 +69,14 @@ export class RemindersStore {
     this.db
       .prepare(
         `INSERT INTO reminders
-         (booking_id, phone, client_name, tour_id, tour_name_he, start_at_iso,
+         (booking_id, order_id_ecom, phone, client_name, tour_id, tour_name_he, start_at_iso,
           participant_count, status, send_at_iso, sent_at_iso, last_reply_ts,
           created_at, updated_at)
-         VALUES (@booking_id, @phone, @client_name, @tour_id, @tour_name_he, @start_at_iso,
+         VALUES (@booking_id, @order_id_ecom, @phone, @client_name, @tour_id, @tour_name_he, @start_at_iso,
                  @participant_count, @status, @send_at_iso, @sent_at_iso, @last_reply_ts,
                  @now, @now)
          ON CONFLICT(booking_id) DO UPDATE SET
+           order_id_ecom = excluded.order_id_ecom,
            phone = excluded.phone,
            client_name = excluded.client_name,
            tour_id = excluded.tour_id,
@@ -85,6 +90,7 @@ export class RemindersStore {
       )
       .run({
         booking_id: r.bookingId,
+        order_id_ecom: r.orderIdEcom,
         phone: r.phone,
         client_name: r.clientName,
         tour_id: r.tourId,

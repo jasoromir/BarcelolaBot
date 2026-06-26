@@ -420,5 +420,43 @@ export function createWixClient(opts: WixClientOpts): WixClient {
         clearTimeout(t);
       }
     },
+
+    async getOrderPaymentInfo(orderId: string): Promise<import('./types.js').OrderPaymentInfo | null> {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetchFn(`${base}/ecom/v1/orders/${encodeURIComponent(orderId)}`, {
+          method: 'GET',
+          headers: {
+            Authorization: opts.apiKey,
+            'wix-site-id': opts.siteId,
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as {
+          order?: {
+            paymentStatus?: string;
+            balanceSummary?: {
+              paid?: { amount?: string; formattedAmount?: string };
+              balance?: { amount?: string; formattedAmount?: string };
+            };
+          };
+        };
+        const order = data.order;
+        if (!order || order.paymentStatus !== 'PARTIALLY_PAID') return null;
+        const paid = order.balanceSummary?.paid?.amount;
+        const balance = order.balanceSummary?.balance?.amount;
+        if (!paid || !balance) return null;
+        // Extract currency symbol from formattedAmount (e.g. "19.00€" → "€")
+        const fmt = order.balanceSummary?.paid?.formattedAmount ?? '';
+        const currencySymbol = fmt.replace(/[\d.,\s]/g, '') || '€';
+        return { paid, balance, currencySymbol };
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(t);
+      }
+    },
   };
 }

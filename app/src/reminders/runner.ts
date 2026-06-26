@@ -1,11 +1,13 @@
 import type { AppLogger } from '../log/logger.js';
 import type { RemindersStore, ReminderRow } from '../persistence/reminders.js';
 import type { WhatsAppClient } from '../whatsapp/types.js';
+import type { WixClient } from '../wix/types.js';
 import type { TemplatesConfig, ToursConfig } from '../config/schemas.js';
 import { buildReminder24h } from './templates.js';
 
 export interface ReminderRunnerDeps {
   wa: WhatsAppClient;
+  wix: WixClient;
   reminders: RemindersStore;
   logger: AppLogger;
   config: { templates: TemplatesConfig; tours: ToursConfig };
@@ -33,11 +35,30 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
   async function sendOne(r: ReminderRow): Promise<'sent' | 'deferred' | 'failed'> {
     if (!deps.isConnected()) return 'deferred';
     if (deps.isPaused()) return 'deferred';
+
+    // Look up deposit/balance info if this booking has an eCommerce order ID.
+    // Failure is non-fatal — we fall back to no deposit line rather than
+    // failing the whole reminder send.
+    let depositLine: string | undefined;
+    if (r.orderIdEcom) {
+      try {
+        const payment = await deps.wix.getOrderPaymentInfo(r.orderIdEcom);
+        if (payment) {
+          depositLine =
+            `\n💳 תזכורת תשלום: שילמתם פיקדון של *${payment.paid}${payment.currencySymbol}*.\n` +
+            `יתרת התשלום (*${payment.balance}${payment.currencySymbol}*) תשולם למדריך בסיום הסיור.`;
+        }
+      } catch {
+        // swallow — payment info is nice-to-have
+      }
+    }
+
     const body = buildReminder24h({
       reminder: r,
       templates: deps.config.templates,
       tours: deps.config.tours,
       officialContactNumber: deps.settings.officialContactNumber,
+      depositLine,
     });
     try {
       await deps.wa.sendDirect(r.phone, body);

@@ -34,6 +34,15 @@ export interface WixService {
   type: string;
 }
 
+export interface OrderPaymentInfo {
+  /** Amount already paid (deposit). */
+  paid: string;
+  /** Amount still due at the tour. */
+  balance: string;
+  /** Currency symbol/code as Wix formats it (e.g. "€"). Derived from formattedAmount. */
+  currencySymbol: string;
+}
+
 export interface WixClient {
   getToursForDate(date: string): Promise<Tour[]>;
   cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult>;
@@ -41,4 +50,6 @@ export interface WixClient {
     input: UpdateParticipantsInput,
   ): Promise<UpdateParticipantsResult>;
   listServices(): Promise<WixService[]>;
+  /** Returns payment info for a deposit booking, or null if not found / not a deposit. */
+  getOrderPaymentInfo(orderId: string): Promise<OrderPaymentInfo | null>;
 }

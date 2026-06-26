@@ -24,6 +24,8 @@ export interface Tour {
 
 export interface BookingEvent {
   bookingId: string;
+  /** eCommerce order ID — different from bookingId; used for payment info lookups. */
+  orderIdEcom?: string;
   tourId: string;
   tourTitle?: string; // from Wix bookedEntity.title, fallback when not in tours.yaml
   date: ISODateString;

@@ -36,6 +36,8 @@ export interface ReminderTemplateInput {
   templates: TemplatesConfig;
   tours: ToursConfig;
   officialContactNumber: string;
+  /** When the booking has a deposit, include a payment reminder line; omit otherwise. */
+  depositLine?: string;
 }
 
 export function buildReminder24h(input: ReminderTemplateInput): string {
@@ -49,6 +51,8 @@ export function buildReminder24h(input: ReminderTemplateInput): string {
     participant_count: String(input.reminder.participantCount),
     official_contact_number: input.officialContactNumber,
     anti_reply_footer: footer,
+    // Empty string when no deposit — the template `{deposit_line}` becomes invisible.
+    deposit_line: input.depositLine ?? '',
   });
 }
 

@@ -151,6 +151,7 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
             : new Date(sendAtMs).toISOString();
         reminders.upsert({
           bookingId: event.bookingId,
+          orderIdEcom: event.orderIdEcom ?? null,
           phone,
           clientName: event.clientName,
           tourId: event.tourId || null,

@@ -94,6 +94,10 @@ const MIGRATIONS = [
      sent_at TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS idx_worker_forwards_status ON worker_forwards(status)`,
+  // Migration: eCommerce order ID alongside the bookingId for payment lookups.
+  // ALTER TABLE is idempotent via the IGNORE approach: SQLite errors on a duplicate
+  // column but we catch it in the migration runner below.
+  `ALTER TABLE reminders ADD COLUMN order_id_ecom TEXT`,
 ];
 
 const SEEDS: Array<[string, string]> = [
@@ -108,7 +112,14 @@ export function openDatabase(dbPath: string): DB {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.transaction(() => {
-    for (const sql of MIGRATIONS) db.exec(sql);
+    for (const sql of MIGRATIONS) {
+      try {
+        db.exec(sql);
+      } catch (err) {
+        // ALTER TABLE throws if the column already exists — safe to ignore.
+        if (!/duplicate column/i.test((err as Error).message)) throw err;
+      }
+    }
     const now = new Date().toISOString();
     const insert = db.prepare(
       'INSERT OR IGNORE INTO control_state (key, value, updated_at) VALUES (?, ?, ?)',

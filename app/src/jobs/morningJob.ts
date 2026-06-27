@@ -96,9 +96,11 @@ export async function runMorningJob(input: MorningJobInput): Promise<JobOutcome>
       // Include tours that have bookings OR start at noon or later (afternoon
       // tours without bookings are still worth advertising — people might
       // still book). Only hide zero-booking morning tours (before 12:00).
-      const eligible = tours.filter(
-        (t) => t.bookingCount > 0 || t.startTime >= '12:00',
-      );
+      const eligible = tours.filter((t) => {
+        const lang = input.config.tours.tours[t.id]?.language;
+        if (lang === 'en') return false;
+        return t.bookingCount > 0 || t.startTime >= '12:00';
+      });
 
       // If NO tours today have any attendees, skip the broadcast entirely —
       // sending a "tomorrow's tours:" message with an empty body is noise.

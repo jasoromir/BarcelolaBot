@@ -69,9 +69,12 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
       // Include tours that have bookings OR start at noon or later (afternoon
       // tours without bookings are still worth advertising — people might sign
       // up). Only hide zero-booking morning tours (before 12:00).
-      const eligible = tours.filter(
-        (t) => t.bookingCount > 0 || t.startTime >= '12:00',
-      );
+      const eligible = tours.filter((t) => {
+        // Skip English-only tours — the Hebrew broadcasts shouldn't include them.
+        const lang = input.config.tours.tours[t.id]?.language;
+        if (lang === 'en') return false;
+        return t.bookingCount > 0 || t.startTime >= '12:00';
+      });
       const targets = resolveTargets(input.config);
 
       const message = buildBroadcastMessage({

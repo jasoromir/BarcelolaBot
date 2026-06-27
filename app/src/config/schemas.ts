@@ -27,6 +27,7 @@ export const ToursConfigSchema = z.object({
       description_he: z.string(),
       meeting_point_he: z.string(),
       google_maps_url: z.string().url().optional(),
+      language: z.enum(['he', 'en']).optional(),
     }),
   ),
 });

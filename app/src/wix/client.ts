@@ -166,39 +166,108 @@ export function createWixClient(opts: WixClientOpts): WixClient {
     }
   }
 
+  // Fetch all scheduled sessions for a local date via the Time Slots API.
+  // This returns sessions regardless of whether anyone booked — the missing
+  // piece that the bookings-only query couldn't provide.
+  async function fetchEventTimeSlots(
+    date: string,
+  ): Promise<Array<{ serviceId: string; startLocal: string; endLocal: string; location?: string }>> {
+    const [y, m, d] = date.split('-');
+    const from = `${date}T00:00:00`;
+    const to = `${y}-${m}-${String(Number(d) + 1).padStart(2, '0')}T00:00:00`;
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const slots: Array<{ serviceId: string; startLocal: string; endLocal: string; location?: string }> = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 5; page++) {
+        const res = await fetchFn(`${base}/_api/service-availability/v2/time-slots/event`, {
+          method: 'POST',
+          headers: {
+            Authorization: opts.apiKey,
+            'wix-site-id': opts.siteId,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fromLocalDate: from,
+            toLocalDate: to,
+            timeZone: tz,
+            includeNonBookable: true,
+            cursorPaging: { limit: 50, ...(cursor ? { cursor } : {}) },
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) break;
+        const data = (await res.json()) as {
+          timeSlots?: Array<{
+            serviceId?: string;
+            localStartDate?: string;
+            localEndDate?: string;
+            location?: { formattedAddress?: string };
+          }>;
+          pagingMetadata?: { hasNext?: boolean; cursors?: { next?: string } };
+        };
+        for (const ts of data.timeSlots ?? []) {
+          if (ts.serviceId && ts.localStartDate && ts.localEndDate) {
+            slots.push({
+              serviceId: ts.serviceId,
+              startLocal: ts.localStartDate,
+              endLocal: ts.localEndDate,
+              location: ts.location?.formattedAddress,
+            });
+          }
+        }
+        if (!data.pagingMetadata?.hasNext) break;
+        cursor = data.pagingMetadata?.cursors?.next;
+        if (!cursor) break;
+      }
+      return slots;
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   return {
     async getToursForDate(date: string): Promise<Tour[]> {
-      // Fetch bookings from start-of-local-date onward; stop once we cross end-of-local-date.
+      // Step 1: Get ALL scheduled sessions for this date (including zero-booking ones).
+      const eventSlots = await fetchEventTimeSlots(date);
+
+      // Seed perSession from the time-slots response so every session exists
+      // even if no bookings are found for it later.
+      const perSession: Map<string, Tour> = new Map();
+      for (const slot of eventSlots) {
+        const startTime = slot.startLocal.slice(11, 16); // "HH:mm"
+        const endTime = slot.endLocal.slice(11, 16);
+        const sessionKey = `${slot.serviceId}-${slot.startLocal}`;
+        if (!perSession.has(sessionKey)) {
+          perSession.set(sessionKey, {
+            id: slot.serviceId,
+            date,
+            startTime,
+            endTime,
+            bookingCount: 0,
+            location: slot.location,
+            participants: [],
+          });
+        }
+      }
+
+      // Step 2: Fetch confirmed bookings to overlay participant counts and details.
       const startFromIso = new Date(`${date}T00:00:00.000Z`).toISOString();
-      // Local end-of-day as a UTC instant: take the last moment of the local day.
-      // Compute by formatting tomorrow-00:00 local as UTC.
       const [y, m, d] = date.split('-').map(Number);
-      // Construct a UTC instant that represents local midnight; approximate and adjust by offset.
       const localMidnightGuess = new Date(Date.UTC(y!, (m ?? 1) - 1, (d ?? 1) + 1, 0, 0, 0));
-      // Adjust for timezone offset: observe what this instant looks like in tz and back-calc.
       const parts = new Intl.DateTimeFormat('en-GB', {
         timeZone: tz,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
       }).formatToParts(localMidnightGuess);
       const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
-      const observedUtc = Date.UTC(
-        get('year'),
-        get('month') - 1,
-        get('day'),
-        get('hour'),
-        get('minute'),
-        get('second'),
-      );
+      const observedUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
       const offsetMs = observedUtc - localMidnightGuess.getTime();
       const endExclusiveMs = localMidnightGuess.getTime() - offsetMs;
 
-      const perSession: Map<string, Tour> = new Map();
       let cursor: string | undefined = undefined;
       const maxPages = 20;
       for (let page = 0; page < maxPages; page++) {
@@ -217,7 +286,12 @@ export function createWixClient(opts: WixClientOpts): WixClient {
             break;
           }
           const serviceId = b.bookedEntity?.serviceId ?? 'unknown';
-          const sessionKey = s.sessionId || `${serviceId}-${s.start}`;
+          // Key must match the time-slots seed format: serviceId-localDateTimeT
+          // The time-slots API gives local times like "2026-06-27T20:00:00";
+          // bookings give ISO with offset like "2026-06-27T20:00:00.000+02:00".
+          // Normalize by formatting the start instant to local "YYYY-MM-DDTHH:mm:00".
+          const localStart = `${toLocalDate(s.start, tz)}T${toLocalTime(s.start, tz)}:00`;
+          const sessionKey = `${serviceId}-${localStart}`;
           const count = participantCount(b);
           const participant = {
             name: asName(b.formInfo?.contactDetails),
@@ -231,6 +305,8 @@ export function createWixClient(opts: WixClientOpts): WixClient {
           if (existing) {
             existing.bookingCount += count;
             existing.participants!.push(participant);
+            if (!existing.tourTitle) existing.tourTitle = b.bookedEntity?.title;
+            if (!existing.location) existing.location = b.bookedEntity?.location?.address;
           } else {
             perSession.set(sessionKey, {
               id: serviceId,

@@ -6,12 +6,14 @@ night_header: |
   *סיורים חינם על בסיס טיפ בתוך העיר*
 
 morning_header: |
-  *בוקר טוב לכל המטיילים והמטיילות ☀️*
+  *בוקר טוב לכל המטיילים והמטיילות ☀️🌻*
   *היום {weekday_he} ה-{date} — הסיורים שיתקיימו:*
 
 footer: |
   🌻 *למידע נוסף והרשמה לסיורים הכנסו לאתר שלנו:*
   https://www.barcelola-tours.com/barcelolatours
+
+  *נשמח לראותכם!*
 
 tour_block: |
   {emoji} {time_range}

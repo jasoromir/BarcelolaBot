@@ -46,7 +46,7 @@ describe('buildBroadcastMessage', () => {
       templates,
     });
     expect(out).toContain('NIGHT');
-    expect(out).toContain('2026-04-26');
+    expect(out).toContain('26/04/2026');
     expect(out).toContain('10:30-13:30');
     expect(out).toContain('גאודי');
     expect(out).toContain('FOOTER');

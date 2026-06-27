@@ -22,28 +22,33 @@ export interface BroadcastInput {
   templates: TemplatesConfig;
 }
 
+function dateDDMMYYYY(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
+}
+
 export function buildBroadcastMessage(input: BroadcastInput): string {
   const header =
     input.kind === 'night' ? input.templates.night_header : input.templates.morning_header;
-  const headerVars = { weekday_he: weekdayHe(input.date), date: input.date };
+  const headerVars = { weekday_he: weekdayHe(input.date), date: dateDDMMYYYY(input.date) };
   const parts: string[] = [interpolate(header, headerVars)];
 
   const sorted = [...input.tours].sort((a, b) => a.startTime.localeCompare(b.startTime));
   for (const t of sorted) {
     const cfg = input.toursConfig.tours[t.id];
-    // Fallback to Wix-provided data when the service_id isn't in tours.yaml
-    // yet. Guides can still read the broadcast; we just lose the emoji and
-    // the human-written description/meeting point for that tour.
     const emoji = cfg?.emoji ?? '🌻';
     const nameHe = cfg?.name_he ?? t.tourTitle ?? 'סיור';
     const descriptionHe = cfg?.description_he?.trim() ?? '';
     const meetingPointHe = cfg?.meeting_point_he ?? t.location ?? '';
+    const mapsUrl = cfg?.google_maps_url ?? '';
+    const mapsUrlLine = mapsUrl ? `📍 ${mapsUrl}` : '';
     const block = interpolate(input.templates.tour_block, {
       emoji,
       time_range: `${t.startTime}-${t.endTime}`,
       name_he: nameHe,
       description_he: descriptionHe,
       meeting_point_he: meetingPointHe,
+      maps_url_line: mapsUrlLine,
     });
     parts.push(block);
   }

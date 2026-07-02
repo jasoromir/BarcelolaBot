@@ -4,6 +4,8 @@ import pkg from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import type { WhatsAppState } from '../types.js';
 import type {
+  GroupJoinHandler,
+  GroupMessageHandler,
   IncomingDmHandler,
   ReactionHandler,
   SendResult,
@@ -49,6 +51,8 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   const listeners: Listener[] = [];
   const dmHandlers: IncomingDmHandler[] = [];
   const reactionHandlers: ReactionHandler[] = [];
+  const groupMessageHandlers: GroupMessageHandler[] = [];
+  const groupJoinHandlers: GroupJoinHandler[] = [];
   let current: WhatsAppState = { kind: 'disconnected' };
   const setState = (s: WhatsAppState) => {
     current = s;
@@ -159,8 +163,42 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       `[wa:${eventName}] id=${serialized} from=${from} fromMe=${fromMe} bodyLen=${bodyLen} type=${msg?.type}`,
     );
     if (fromMe) return;
+
+    // Group messages end in @g.us. Dispatch them to group handlers (spam
+    // moderation) and stop — the DM/reminder path below only handles 1:1 chats.
+    if (from.endsWith('@g.us')) {
+      if (serialized && seenMessageIds.has(serialized)) return;
+      if (serialized) {
+        seenMessageIds.add(serialized);
+        if (seenMessageIds.size > 500) {
+          const first = seenMessageIds.values().next().value;
+          if (first) seenMessageIds.delete(first);
+        }
+      }
+      if (groupMessageHandlers.length === 0) return;
+      // `author` is the participant who sent it; `from` is the group jid.
+      const authorId: string =
+        (msg as any).author ?? (msg as any)._data?.author ?? '';
+      const gm = {
+        messageId: serialized,
+        groupId: from,
+        authorId,
+        body: typeof msg.body === 'string' ? msg.body : '',
+        type: typeof msg.type === 'string' ? msg.type : 'unknown',
+        timestamp:
+          typeof msg.timestamp === 'number' ? msg.timestamp : Math.floor(Date.now() / 1000),
+        hasMedia: Boolean(msg.hasMedia),
+      };
+      for (const h of groupMessageHandlers) {
+        Promise.resolve(h(gm)).catch((err) => {
+          console.error('[wa:groupMessageHandler] error', err);
+        });
+      }
+      return;
+    }
+
     // Accept both classic @c.us (phone-addressed) and @lid (LID-addressed) DMs.
-    // Groups end in @g.us and are ignored. Anything else we also skip.
+    // Anything else we skip.
     if (!(from.endsWith('@c.us') || from.endsWith('@lid'))) return;
     if (typeof msg.body !== 'string' || msg.body.length === 0) return;
     if (serialized && seenMessageIds.has(serialized)) return;
@@ -259,6 +297,30 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     );
   });
 
+  client.on('group_join', (notification: any) => {
+    try {
+      if (groupJoinHandlers.length === 0) return;
+      const groupId: string = notification?.chatId ?? notification?.id?.remote ?? '';
+      const recipientIds: string[] = Array.isArray(notification?.recipientIds)
+        ? notification.recipientIds
+        : [];
+      const ts: number =
+        typeof notification?.timestamp === 'number'
+          ? notification.timestamp
+          : Math.floor(Date.now() / 1000);
+      if (!groupId || recipientIds.length === 0) return;
+      const ev = { groupId, participantIds: recipientIds, timestamp: ts };
+      console.log(`[wa:group_join] group=${groupId} joined=${recipientIds.join(',')}`);
+      for (const h of groupJoinHandlers) {
+        Promise.resolve(h(ev)).catch((err) => {
+          console.error('[wa:groupJoinHandler] error', err);
+        });
+      }
+    } catch (err) {
+      console.error('[wa:group_join] dispatch failed', err);
+    }
+  });
+
   client.on('message_reaction', (reaction: any) => {
     try {
       // whatsapp-web.js emits every reaction update, including removals (reaction === '').
@@ -281,6 +343,28 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       console.error('[wa:message_reaction] dispatch failed', err);
     }
   });
+
+  async function debugLinkPreview(url: string): Promise<unknown> {
+    return client.pupPage!.evaluate(async (u: string) => {
+      const w = globalThis as any;
+      const { findLink } = w.require('WALinkify');
+      const link = findLink(u);
+      if (!link) return { error: 'no link found' };
+      const result = await w.require('WAWebLinkPreviewChatAction').getLinkPreview(link);
+      if (!result || !result.data) return { error: 'no preview data', raw: result };
+      const d = result.data;
+      return {
+        title: d.title,
+        description: d.description,
+        canonicalUrl: d.canonicalUrl,
+        matchedText: d.matchedText,
+        thumbnail: d.thumbnail ? `base64(${d.thumbnail.length} chars)` : null,
+        mediaType: d.mediaType,
+        subtype: d.subtype,
+        previewType: d.previewType,
+      };
+    }, url);
+  }
 
   async function sendToGroup(groupId: string, body: string): Promise<SendResult> {
     const msg = await client.sendMessage(groupId, body);
@@ -307,6 +391,48 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     const chat = await client.getChatById(groupId);
     await (chat as unknown as { setMessagesAdminsOnly: (v: boolean) => Promise<void> })
       .setMessagesAdminsOnly(adminsOnly);
+  }
+
+  async function getGroupAdmins(groupId: string): Promise<string[]> {
+    const chat = await client.getChatById(groupId);
+    const participants =
+      (chat as unknown as { participants?: Array<{ id: { _serialized: string }; isAdmin: boolean }> })
+        .participants ?? [];
+    return participants.filter((p) => p.isAdmin).map((p) => p.id._serialized);
+  }
+
+  async function deleteMessageForEveryone(messageId: string): Promise<void> {
+    const msg = await client.getMessageById(messageId);
+    if (!msg) throw new Error(`deleteMessageForEveryone: message not found id=${messageId}`);
+    await msg.delete(true);
+  }
+
+  async function removeParticipant(groupId: string, participantId: string): Promise<void> {
+    const chat = await client.getChatById(groupId);
+    await (chat as unknown as { removeParticipants: (ids: string[]) => Promise<unknown> })
+      .removeParticipants([participantId]);
+  }
+
+  async function resolveParticipantPhone(participantId: string): Promise<string | null> {
+    // @c.us ids already carry the E.164 digits.
+    if (participantId.endsWith('@c.us')) {
+      const digits = participantId.replace(/@c\.us$/, '');
+      return /^\d{6,15}$/.test(digits) ? `+${digits}` : null;
+    }
+    // @lid (and anything else) is opaque — resolve via the Contact, which for
+    // @lid contacts exposes the real @c.us jid in id._serialized / id.user.
+    try {
+      const contact: any = await client.getContactById(participantId);
+      const candidates = [contact?.id?._serialized, contact?.id?.user, contact?.number];
+      for (const raw of candidates) {
+        if (typeof raw !== 'string' || !raw) continue;
+        const digits = raw.replace(/@c\.us$/, '');
+        if (/^\d{6,15}$/.test(digits) && !digits.startsWith('1200')) return `+${digits}`;
+      }
+    } catch (err) {
+      console.error(`[wa:resolveParticipantPhone] failed for ${participantId}:`, err);
+    }
+    return null;
   }
 
   async function listChats() {
@@ -472,13 +598,20 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     sendDirect,
     isGroupAdmin,
     setGroupMessagesAdminsOnly,
+    getGroupAdmins,
+    deleteMessageForEveryone,
+    removeParticipant,
+    resolveParticipantPhone,
     listChats,
     getMessages,
     forwardMessage,
     sendSticker,
     onIncomingDm: (h: IncomingDmHandler) => dmHandlers.push(h),
     onReaction: (h: ReactionHandler) => reactionHandlers.push(h),
+    onGroupMessage: (h: GroupMessageHandler) => groupMessageHandlers.push(h),
+    onGroupJoin: (h: GroupJoinHandler) => groupJoinHandlers.push(h),
     sendStickerFromDataUrl,
     downloadStickerBytes,
+    debugLinkPreview,
   };
 }

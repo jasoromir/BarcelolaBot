@@ -1,11 +1,4 @@
-# NOTE: the header's first URL is what WhatsApp renders as the link-preview
-# card (with the Barcelola image). Keep the barcelola-tours.com link as the
-# FIRST url in the message — before any Google Maps links in the tour blocks —
-# or WhatsApp will preview a maps link instead (which has no image).
 night_header: |
-  🌻 *Barcelola Tours*
-  https://www.barcelola-tours.com/barcelolatours?v=2
-
   *לילה טוב לכל המטיילים והמטיילות האהובים מ- Barcelola Tours ✨🌜*
 
   ❤️ *לנמצאים בברצלונה - הצטרפו לסיורי ברצלולה, מחר {weekday_he} ה-{date}* ❤️
@@ -13,15 +6,12 @@ night_header: |
   *סיורים חינם על בסיס טיפ בתוך העיר*
 
 morning_header: |
-  🌻 *Barcelola Tours*
-  https://www.barcelola-tours.com/barcelolatours?v=2
-
   *בוקר טוב לכל המטיילים והמטיילות ☀️🌻*
   *היום {weekday_he} ה-{date} — הסיורים שיתקיימו:*
 
 footer: |
   🌻 *למידע נוסף והרשמה לסיורים הכנסו לאתר שלנו:*
-  https://www.barcelola-tours.com/barcelolatours?v=2
+  https://www.barcelola-tours.com/barcelolatours
 
   *נשמח לראותכם!*
 
@@ -30,7 +20,6 @@ tour_block: |
   *{name_he}*
   {description_he}
   *נקודת ושעת מפגש* - {meeting_point_he}
-  {maps_url_line}
 
 booking_confirmation: |
   הולה {client_name}! 👋

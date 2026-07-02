@@ -637,6 +637,16 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
+  exp.get('/admin/api/debug/link-preview', async (req, res) => {
+    const url = (req.query.url as string) || 'https://www.barcelola-tours.com/barcelolatours';
+    try {
+      const result = await app.whatsapp.debugLinkPreview(url);
+      res.json({ url, preview: result });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Re-send a specific sticker into a target chat (default: back to BARCELOLA
   // BOT group so we can eyeball it live). Surfaces any sendSticker errors now
   // that the client throws on hasMedia=false or null downloads.

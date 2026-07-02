@@ -3,8 +3,8 @@ schedule:
   nightly_cron: "30 21 * * *"
   morning_cron: "30 8 * * *"
 broadcast:
-  mode: "test"
-  test_group_id: "120363425214664727@g.us"  # Barcelola BOT🌻 - our testing group
+  mode: "production"
+  test_group_id: "120363425214664727@g.us"  # Barcelola BOT🌻 - for manual test triggers only
   inter_message_delay_ms: 2000
 min_bookings_to_run: 1
 retry:
@@ -29,3 +29,58 @@ notifications:
   proactive_warn_after_days: 12         # warn to re-link before the ~14d expiry window
   # Requires RESEND_API_KEY env var on the host. Defaults to Resend's sandbox
   # sender; set email_from to a verified-domain address for production.
+moderation:
+  enabled: true
+  # Enforcement (delete + kick) happens ONLY in these groups. Detection and
+  # alerting run everywhere. Delete/kick require the bot to be GROUP ADMIN in
+  # each group — without admin the actions fail (and are logged as errors).
+  enforce_in_groups:
+    - "120363425214664727@g.us"            # Barcelola BOT🌻 - testing group
+    - "34651886491-1583845723@g.us"        # 🌻1 מטיילים עם ברצלולה 1🌻
+    - "34651886491-1631796027@g.us"        # 🌻2 מטיילים עם ברצלולה 2🌻
+    - "34651886491-1612004982@g.us"        # 🌻3 מטיילים עם ברצלולה 3🌻
+    - "34651886491-1581073979@g.us"        # 🌻4 מטיילים עם ברצלולה 4🌻
+    - "34651886491-1613062135@g.us"        # 🌻5 מטיילים עם ברצלולה 5🌻
+  new_joiner_window_minutes: 60
+  score_spam_threshold: 0.8       # >= this → auto delete+kick (in enforce groups)
+  score_review_min: 0.4           # 0.4–0.8 → ask Gemini to decide
+  # Substrings (case-insensitive) that flag crypto / financial / promo spam.
+  # Mix of English and Hebrew investment/stock-market terms seen in real spam.
+  keywords:
+    # English / crypto
+    - usdt
+    - usdc
+    - btc
+    - bitcoin
+    - binance
+    - crypto
+    - airdrop
+    - "pump"
+    - profit
+    - invest
+    - trading
+    - forex
+    - "dm me"
+    - telegram
+    - earn money
+    - withdraw
+    - wallet
+    # Hebrew — stock market / investing pitch
+    - שוק המניות      # the stock market
+    - מניות           # stocks
+    - השקעות          # investments
+    - השקעה           # investment
+    - משקיעים         # investors
+    - שווקי ההון      # capital markets
+    - שוק ההון        # capital market
+    - מסחר            # trading
+    - רווח            # profit
+    - תשואה           # returns/yield
+    - קריפטו          # crypto
+    - ביטקוין         # bitcoin
+    - הפרופסור        # "the professor" (recurring spam persona)
+    - קבוצת vip       # VIP group
+    - קבוצת ה-vip     # the VIP group
+  # Never delete/kick these numbers, even if a message scores as spam.
+  never_action_phones:
+    - "+34623964800"   # official contact

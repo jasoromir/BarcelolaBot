@@ -5,10 +5,9 @@ groups:
     name: "Barcelola BOT🌻"
     active: true
 
-  # Production groups (disabled for now - need admin permissions):
-  # - id: "34651886491-1583845723@g.us"
-  #   name: "🌻1 מטיילים עם ברצלולה 1🌻"
-  #   active: false
+  - id: "34651886491-1583845723@g.us"
+    name: "🌻1 מטיילים עם ברצלולה 1🌻"
+    active: true
   # - id: "34651886491-1631796027@g.us"
   #   name: "🌻 2 מטיילים עם ברצלולה 2🌻"
   #   active: false

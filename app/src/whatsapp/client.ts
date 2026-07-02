@@ -347,21 +347,38 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   async function debugLinkPreview(url: string): Promise<unknown> {
     return client.pupPage!.evaluate(async (u: string) => {
       const w = globalThis as any;
+
+      // Test 1: can the page context fetch the URL at all?
+      let fetchTest: string;
+      try {
+        const r = await fetch(u, { method: 'HEAD' });
+        fetchTest = `fetch HEAD ${r.status} ${r.headers.get('content-type')}`;
+      } catch (e: any) {
+        fetchTest = `fetch failed: ${e?.message}`;
+      }
+
+      // Test 2: WALinkify + getLinkPreview
       const { findLink } = w.require('WALinkify');
       const link = findLink(u);
-      if (!link) return { error: 'no link found' };
+      if (!link) return { fetchTest, error: 'no link found by WALinkify' };
+
       const result = await w.require('WAWebLinkPreviewChatAction').getLinkPreview(link);
-      if (!result || !result.data) return { error: 'no preview data', raw: result };
+      if (!result || !result.data) return { fetchTest, error: 'no preview data', raw: JSON.stringify(result)?.slice(0, 500) };
       const d = result.data;
       return {
+        fetchTest,
         title: d.title,
         description: d.description,
         canonicalUrl: d.canonicalUrl,
         matchedText: d.matchedText,
         thumbnail: d.thumbnail ? `base64(${d.thumbnail.length} chars)` : null,
+        thumbnailUrl: d.thumbnailUrl || d.directPath || null,
         mediaType: d.mediaType,
         subtype: d.subtype,
         previewType: d.previewType,
+        doNotPlayInline: d.doNotPlayInline,
+        // Dump all top-level keys to see what's available
+        allKeys: Object.keys(d),
       };
     }, url);
   }

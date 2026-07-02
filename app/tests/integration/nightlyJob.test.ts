@@ -100,7 +100,7 @@ describe('runNightlyJob', () => {
     expect(result.toursCount).toBe(1);
     expect(result.groupsSent).toBe(1);
     expect(result.groupsClosed).toBe(1);
-    expect(client.sendToGroup).toHaveBeenCalledWith('test@g.us', expect.stringContaining('NIGHT'));
+    expect(client.sendToGroup).toHaveBeenCalledWith('test@g.us', expect.stringContaining('NIGHT'), expect.anything());
     expect(client.setGroupMessagesAdminsOnly).toHaveBeenCalledWith('test@g.us', true);
   });
 

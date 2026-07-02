@@ -14,6 +14,54 @@ import type {
 
 const { Client, LocalAuth } = pkg;
 
+export interface LinkPreviewData {
+  title: string;
+  description: string;
+  canonicalUrl: string;
+  matchedText: string;
+  thumbnail?: string; // base64 JPEG
+}
+
+/**
+ * Fetch OG metadata from a URL (runs in Node.js, not in Chromium).
+ * Returns pre-computed link preview data that can be injected into sendMessage.
+ */
+export async function fetchLinkPreview(url: string): Promise<LinkPreviewData | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'WhatsApp/2' },
+      redirect: 'follow',
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const og = (prop: string): string => {
+      const m = html.match(new RegExp(`<meta[^>]*property="${prop}"[^>]*content="([^"]*)"`, 'i'));
+      return m?.[1] ?? '';
+    };
+    const title = og('og:title') || url;
+    const description = og('og:description') || '';
+    const canonicalUrl = og('og:url') || url;
+    const imageUrl = og('og:image');
+
+    let thumbnail: string | undefined;
+    if (imageUrl) {
+      try {
+        const imgRes = await fetch(imageUrl, { redirect: 'follow' });
+        if (imgRes.ok) {
+          const buf = Buffer.from(await imgRes.arrayBuffer());
+          thumbnail = buf.toString('base64');
+        }
+      } catch {
+        // image fetch failed — send without thumbnail
+      }
+    }
+
+    return { title, description, canonicalUrl, matchedText: url, thumbnail };
+  } catch {
+    return null;
+  }
+}
+
 function clearChromiumSingletonLocks(sessionDir: string): void {
   // Containers killed without graceful shutdown leave Singleton{Lock,Socket,Cookie}
   // in the Chromium profile; whatsapp-web.js's LocalAuth stores the profile under
@@ -383,7 +431,31 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     }, url);
   }
 
-  async function sendToGroup(groupId: string, body: string): Promise<SendResult> {
+  async function sendToGroup(groupId: string, body: string, opts?: { linkPreview?: LinkPreviewData }): Promise<SendResult> {
+    if (opts?.linkPreview) {
+      // Bypass the broken WAWebLinkPreviewChatAction by injecting pre-fetched
+      // preview data directly. We disable the library's auto-preview and pass
+      // the fields ourselves via pupPage.evaluate.
+      const lp = opts.linkPreview;
+      const msg = await client.pupPage!.evaluate(
+        async (chatId: string, content: string, preview: any) => {
+          const w = globalThis as any;
+          const chat = await w.WWebJS.getChat(chatId, { getAsModel: false });
+          if (!chat) return null;
+          const msgResult = await w.WWebJS.sendMessage(chat, content, {
+            linkPreview: undefined,
+            ...preview,
+            preview: true,
+            subtype: 'url',
+          });
+          return msgResult ? w.WWebJS.getMessageModel(msgResult) : null;
+        },
+        groupId,
+        body,
+        lp,
+      );
+      return { messageId: (msg as any)?.id?._serialized ?? '' };
+    }
     const msg = await client.sendMessage(groupId, body);
     return { messageId: msg.id._serialized };
   }

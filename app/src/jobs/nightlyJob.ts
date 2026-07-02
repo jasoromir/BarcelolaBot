@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { WhatsAppClient } from '../whatsapp/types.js';
+import { fetchLinkPreview } from '../whatsapp/client.js';
 import type { WixClient } from '../wix/types.js';
 import type { JobHistory } from '../persistence/jobHistory.js';
 import type { AppLogger } from '../log/logger.js';
@@ -112,15 +113,30 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
 
       let groupsSent = 0;
       if (eligible.length > 0 && verified.admin.length > 0) {
-        const b = new Broadcaster(input.whatsapp, {
-          interMessageDelayMs: input.config.settings.broadcast.inter_message_delay_ms,
-          retry: {
-            attempts: input.config.settings.retry.max_attempts,
-            backoffMs: input.config.settings.retry.backoff_ms,
-          },
-        });
-        const res = await b.send(message, verified.admin);
-        groupsSent = res.sent;
+        // Pre-fetch the OG link preview for the barcelola-tours.com URL so we
+        // can inject it into the message (the headless Chromium's built-in
+        // preview fetcher is broken on Railway — returns null thumbnail).
+        const previewUrl = 'https://www.barcelola-tours.com/barcelolatours';
+        const linkPreview = await fetchLinkPreview(previewUrl).catch(() => null);
+
+        const delay = input.config.settings.broadcast.inter_message_delay_ms;
+        for (let i = 0; i < verified.admin.length; i++) {
+          const gid = verified.admin[i]!;
+          try {
+            await input.whatsapp.sendToGroup(gid, message, linkPreview ? { linkPreview } : undefined);
+            groupsSent += 1;
+          } catch (err) {
+            input.logger.error({
+              source: 'jobs',
+              eventType: 'nightly_send_failed',
+              message: (err as Error).message,
+              metadata: { groupId: gid },
+            });
+          }
+          if (i < verified.admin.length - 1 && delay > 0) {
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
 
         // Send the goodnight sticker to each group after the broadcast message.
         const stickerPath = input.dataDir

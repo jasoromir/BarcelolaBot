@@ -70,7 +70,7 @@ export interface WhatsAppClient {
   state(): WhatsAppState;
   onStateChange(cb: (s: WhatsAppState) => void): void;
 
-  sendToGroup(groupId: string, body: string): Promise<SendResult>;
+  sendToGroup(groupId: string, body: string, opts?: { linkPreview?: import('../whatsapp/client.js').LinkPreviewData }): Promise<SendResult>;
   sendDirect(phoneE164: string, body: string): Promise<SendResult>;
 
   isGroupAdmin(groupId: string): Promise<boolean>;

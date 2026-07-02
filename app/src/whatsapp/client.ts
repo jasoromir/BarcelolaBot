@@ -444,9 +444,17 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
           if (!chat) return null;
           const msgResult = await w.WWebJS.sendMessage(chat, content, {
             linkPreview: undefined,
-            ...preview,
+            title: preview.title,
+            description: preview.description,
+            canonicalUrl: preview.canonicalUrl,
+            matchedText: preview.matchedText,
+            thumbnail: preview.thumbnail,
+            thumbnailWidth: preview.thumbnailWidth || 646,
+            thumbnailHeight: preview.thumbnailHeight || 594,
+            mediaType: 1,
             preview: true,
             subtype: 'url',
+            doNotPlayInline: true,
           });
           return msgResult ? w.WWebJS.getMessageModel(msgResult) : null;
         },

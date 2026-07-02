@@ -20,6 +20,7 @@ tour_block: |
   *{name_he}*
   {description_he}
   *נקודת ושעת מפגש* - {meeting_point_he}
+  {maps_url_line}
 
 booking_confirmation: |
   הולה {client_name}! 👋

@@ -23,6 +23,7 @@ export function startScheduler(app: App): ScheduledTasks {
         history: app.jobHistory,
         reminders: app.reminders,
         logger: app.logger,
+        dataDir: process.env.DATA_DIR ?? './data',
         isPaused: () => app.controlState.isPaused(),
         dryRun: false,
       });

@@ -71,6 +71,13 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     res.json({ runs: app.jobHistory.recent(20) });
   });
 
+  // Moderation audit log — every spam detection/action with the sender's phone,
+  // so a wrongly-removed customer can be identified and re-invited.
+  exp.get('/admin/api/moderation/actions', (req, res) => {
+    const limit = Math.min(Number((req.query.limit as string) ?? 100), 500);
+    res.json({ actions: app.spamActions.recent(limit) });
+  });
+
   exp.post('/admin/api/connect', async (_req, res) => {
     await app.whatsapp.start();
     res.json({ ok: true, state: app.whatsapp.state().kind });
@@ -99,6 +106,7 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       history: app.jobHistory,
       reminders: app.reminders,
       logger: app.logger,
+      dataDir: process.env.DATA_DIR ?? './data',
       isPaused: () => app.controlState.isPaused(),
       dryRun,
     });

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { WhatsAppClient } from '../whatsapp/types.js';
 import type { WixClient } from '../wix/types.js';
 import type { JobHistory } from '../persistence/jobHistory.js';
@@ -17,6 +19,8 @@ export interface NightlyJobInput {
   history: JobHistory;
   logger: AppLogger;
   reminders: RemindersStore;
+  /** Path to DATA_DIR (for loading sticker assets). */
+  dataDir?: string;
   isPaused: () => boolean;
   dryRun: boolean;
   now?: () => Date;
@@ -117,6 +121,27 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
         });
         const res = await b.send(message, verified.admin);
         groupsSent = res.sent;
+
+        // Send the goodnight sticker to each group after the broadcast message.
+        const stickerPath = input.dataDir
+          ? path.join(input.dataDir, 'assets', 'welcome-sticker.webp')
+          : '';
+        if (stickerPath && fs.existsSync(stickerPath)) {
+          const stickerData = fs.readFileSync(stickerPath).toString('base64');
+          const dataUrl = `data:image/webp;base64,${stickerData}`;
+          for (const gid of verified.admin) {
+            try {
+              await input.whatsapp.sendStickerFromDataUrl(gid, dataUrl);
+            } catch (err) {
+              input.logger.warn({
+                source: 'jobs',
+                eventType: 'nightly_sticker_failed',
+                message: (err as Error).message,
+                metadata: { groupId: gid },
+              });
+            }
+          }
+        }
       }
 
       let groupsClosed = 0;

@@ -394,12 +394,72 @@ tail -f bot.log
 
 ---
 
-**Last Updated:** 2026-06-16
+**Last Updated:** 2026-07-03
 **Bot Version:** v0.1.0 (feat/redesign branch)
 
 ---
 
-## 15. Webhook Setup & Testing
+## 15. Deployment & Config Updates (for LLM agents)
+
+This project has TWO layers of config that agents must understand:
+
+### Architecture
+
+```
+app/config/*.yaml          ← bundled config (committed to git, baked into Docker image)
+/app/data/config/*.yaml    ← Railway volume OVERLAY (persists across deploys, NOT in git)
+```
+
+The **overlay wins**: if a file exists in `/app/data/config/`, the config loader uses it INSTEAD of the bundled version with the same name. This is by design — it lets operators edit config at runtime without redeploying.
+
+### How to deploy code changes
+
+```bash
+cd /path/to/BarcelolaBot
+railway up --detach -m "description"
+```
+
+This rebuilds the Docker image and restarts the container. The WhatsApp session survives (it's on the persistent volume at `/app/data/session/`). No QR scan needed.
+
+### How to update config on the live bot (without redeploying)
+
+**Step 1:** Push the file to the Railway volume via SSH:
+```bash
+cat app/config/settings.yaml | railway ssh --service barcelola-whatsapp-bot --environment production -- "cat > /app/data/config/settings.yaml"
+```
+
+**Step 2:** Reload the config (no restart needed):
+```bash
+curl -s -c /tmp/c.txt -X POST https://barcelola-whatsapp-bot-production.up.railway.app/admin/login \
+  -H "Content-Type: application/json" -d '{"password":"barcelola2026"}' > /dev/null && \
+curl -s -b /tmp/c.txt -X POST https://barcelola-whatsapp-bot-production.up.railway.app/admin/api/config/reload
+```
+
+**Step 3 (optional):** Verify the change took effect:
+```bash
+railway ssh --service barcelola-whatsapp-bot --environment production -- "grep -A5 'your_new_block' /app/data/config/settings.yaml"
+```
+
+### Which config files can be updated this way
+
+| File | What it controls |
+|---|---|
+| `settings.yaml` | Schedules, broadcast mode, reminders, notifications, moderation, guide_notify |
+| `tours.yaml` | Tour names, descriptions, meeting points, Google Maps URLs, language |
+| `templates.yaml` | All message templates (broadcast, confirmation, reminder, etc.) |
+| `groups.yaml` | Which WhatsApp groups receive broadcasts |
+| `allowlist.yaml` | Which phone numbers receive booking confirmations |
+
+### Important notes for agents
+
+- **This is NOT "bypassing deployment guardrails"** — it's the documented, intended config-update path for this project. The overlay exists specifically for hot-reloading config without redeploys.
+- **SSH to the Railway container is normal** — we use `railway ssh` routinely for diagnostics, config pushes, and DB queries. The SSH key is already registered.
+- **Always keep local files in sync** — after pushing to the overlay, commit the same change to `app/config/` in the repo so the next deploy doesn't regress.
+- **The admin reload endpoint is safe** — it re-reads all YAML files and validates them with Zod schemas. If the YAML is malformed, the reload fails and the old config stays active.
+
+---
+
+## 16. Webhook Setup & Testing
 
 ### Overview
 

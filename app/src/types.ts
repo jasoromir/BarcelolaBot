@@ -41,6 +41,28 @@ export interface GroupRef {
   name: string; // human-readable
 }
 
+/** A single client's booking on a tour, as needed for the guide roster message. */
+export interface RosterAttendee {
+  name: string;
+  phone: string; // as received from Wix (not yet normalized)
+  participants: number; // people booked under this reservation
+}
+
+/**
+ * One tour session with its assigned guide and the list of clients attending.
+ * Produced by the Wix client for the guide pre-tour notification job.
+ */
+export interface GuideTourRoster {
+  serviceId: string; // Wix serviceId (matches tours.yaml key)
+  eventId?: string; // group-session id, unique per tour occurrence
+  tourTitle: string; // Wix bookedEntity.title
+  startAtIso: ISODateTime; // absolute instant of tour start (UTC)
+  startTimeLocal: string; // "HH:mm" local (Europe/Madrid)
+  guideName?: string; // slot.resource.name, the assigned guide
+  attendees: RosterAttendee[];
+  totalParticipants: number; // sum of attendees[].participants
+}
+
 export type WhatsAppState =
   | { kind: 'disconnected' }
   | { kind: 'qr_pending'; qrDataUrl: string }

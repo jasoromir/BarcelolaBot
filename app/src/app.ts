@@ -12,7 +12,10 @@ import type { DirectMessageSender } from './messaging/directMessage.js';
 import type { AppLogger } from './log/logger.js';
 import type { RemindersStore, ReplyAuditStore } from './persistence/reminders.js';
 import type { WorkerForwardsStore } from './persistence/workerForwards.js';
+import type { GroupMembersStore, SpamActionsStore } from './persistence/groupMembers.js';
+import type { GuideNotificationsStore } from './persistence/guideNotifications.js';
 import type { ReminderRunner } from './reminders/runner.js';
+import type { GuideNotifyRunner } from './jobs/guideNotifyRunner.js';
 import type { Classifier } from './reminders/classifier.js';
 import type { IncomingDm } from './whatsapp/types.js';
 import type { SessionMonitor } from './notify/sessionMonitor.js';
@@ -31,12 +34,17 @@ export interface App {
   reminders: RemindersStore;
   replyAudit: ReplyAuditStore;
   workerForwards: WorkerForwardsStore;
+  groupMembers: GroupMembersStore;
+  spamActions: SpamActionsStore;
+  guideNotifications: GuideNotificationsStore;
 
   whatsapp: WhatsAppClient;
   wix: WixClient;
   dmSender: DirectMessageSender;
   logger: AppLogger;
   reminderRunner: ReminderRunner;
+  /** Sends each guide their attendee roster shortly before tour start. Null if disabled. */
+  guideNotifyRunner: GuideNotifyRunner | null;
   /** Watches the WhatsApp link and emails out-of-band alerts. Null if notifications disabled. */
   sessionMonitor: SessionMonitor | null;
   /** Exposed so admin /simulate-reply can inject synthetic DMs. Null if reminders disabled. */

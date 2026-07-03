@@ -1,0 +1,17 @@
+# Guide roster: maps a guide's name (exactly as it appears as the Wix booking
+# resource name) to the WhatsApp number that receives their pre-tour attendee
+# list. Guides not listed here are skipped (logged), so add numbers as you get
+# them. `name` must match the Wix resource name character-for-character.
+guides:
+  - name: "ליאנה"
+    phone: "+34651886491"
+    active: true
+  - name: "עדי"
+    phone: "+34669705817"
+    active: true
+  - name: "אדיר"
+    phone: "+34604397498"
+    active: true
+  - name: "גאות"
+    phone: "+972543112097"
+    active: true

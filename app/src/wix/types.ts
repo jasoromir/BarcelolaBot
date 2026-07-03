@@ -1,6 +1,6 @@
-import type { Tour, BookingEvent } from '../types.js';
+import type { Tour, BookingEvent, GuideTourRoster } from '../types.js';
 
-export type { Tour, BookingEvent };
+export type { Tour, BookingEvent, GuideTourRoster };
 
 export interface CancelBookingInput {
   bookingId: string;
@@ -45,6 +45,13 @@ export interface OrderPaymentInfo {
 
 export interface WixClient {
   getToursForDate(date: string): Promise<Tour[]>;
+  /**
+   * Returns each tour session on the given local date with its assigned guide
+   * (slot.resource) and the list of confirmed attendees. Used by the guide
+   * pre-tour notification job. Unlike getToursForDate, this uses the
+   * extended-bookings v2 API so the guide resource is available.
+   */
+  getGuideRostersForDate(date: string): Promise<GuideTourRoster[]>;
   cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult>;
   updateNumberOfParticipants(
     input: UpdateParticipantsInput,

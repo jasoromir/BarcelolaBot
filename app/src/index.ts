@@ -12,6 +12,11 @@ import { ControlState } from './persistence/controlState.js';
 import { ControlStateService } from './control/state.js';
 import { RemindersStore, ReplyAuditStore } from './persistence/reminders.js';
 import { WorkerForwardsStore } from './persistence/workerForwards.js';
+import { GroupMembersStore, SpamActionsStore } from './persistence/groupMembers.js';
+import { GuideNotificationsStore } from './persistence/guideNotifications.js';
+import { createGuideNotifyRunner } from './jobs/guideNotifyRunner.js';
+import { createDetector } from './moderation/detector.js';
+import { createModerator } from './moderation/moderator.js';
 import { createGeminiClassifier } from './reminders/classifier.js';
 import { createGeminiDrafter } from './reminders/drafter.js';
 import { createReplyHandler } from './reminders/replyHandler.js';
@@ -62,6 +67,9 @@ async function main(): Promise<void> {
   const reminders = new RemindersStore(db);
   const replyAudit = new ReplyAuditStore(db);
   const workerForwards = new WorkerForwardsStore(db);
+  const groupMembers = new GroupMembersStore(db);
+  const spamActions = new SpamActionsStore(db);
+  const guideNotifications = new GuideNotificationsStore(db);
 
   const cutoff = new Date(Date.now() - 3600_000).toISOString();
   const recovered = jobHistory.markStaleRunning(cutoff);
@@ -113,6 +121,7 @@ async function main(): Promise<void> {
   const drafter = geminiApiKey ? createGeminiDrafter(geminiApiKey) : null;
   const reminderRunner = createReminderRunner({
     wa: whatsapp,
+    wix,
     reminders,
     logger,
     config: { templates: config.templates, tours: config.tours },
@@ -120,10 +129,34 @@ async function main(): Promise<void> {
       pollIntervalSeconds: config.settings.reminders.poll_interval_seconds,
       officialContactNumber: config.settings.reminders.official_contact_number,
       workerGroupId: config.settings.reminders.worker_group_id,
+      defaultGoogleMapsUrl: config.settings.reminders.default_google_maps_url,
     },
     isPaused: () => controlState.isPaused(),
     isConnected: () => whatsapp.state().kind === 'connected',
   });
+
+  // Guide pre-tour roster notifications: poll for tours entering the send
+  // window and DM the assigned guide their attendee list. Null when disabled.
+  const gn = config.settings.guide_notify;
+  const guideNotifyRunner =
+    gn?.enabled
+      ? createGuideNotifyRunner({
+          wa: whatsapp,
+          wix,
+          store: guideNotifications,
+          logger,
+          config: { guides: config.guides, tours: config.tours },
+          settings: {
+            minutesBefore: gn.minutes_before,
+            pollIntervalSeconds: gn.poll_interval_seconds,
+            testMode: gn.test_mode ?? false,
+            testGroupId: gn.test_group_id,
+          },
+          timezone: config.settings.timezone,
+          isPaused: () => controlState.isPaused(),
+          isConnected: () => whatsapp.state().kind === 'connected',
+        })
+      : null;
 
   // Out-of-band alerting: email the operator when the WhatsApp link drops, and
   // proactively before the session ages out. Email (not WhatsApp) is the channel
@@ -180,11 +213,15 @@ async function main(): Promise<void> {
     reminders,
     replyAudit,
     workerForwards,
+    groupMembers,
+    spamActions,
+    guideNotifications,
     whatsapp,
     wix,
     dmSender,
     logger,
     reminderRunner,
+    guideNotifyRunner,
     sessionMonitor,
     replyHandler: null,
     classifier: null,
@@ -229,6 +266,51 @@ async function main(): Promise<void> {
     });
     whatsapp.onReaction(reactionHandler);
     reminderRunner.start();
+  }
+
+  // Spam moderation: detect crypto/promo spam in group chats and (in enforce
+  // groups where the bot is admin) delete the message + remove the sender.
+  // Detection/alerting runs everywhere; enforcement is gated by config.
+  const mod = config.settings.moderation;
+  if (mod?.enabled) {
+    const detector = createDetector(
+      {
+        keywords: mod.keywords,
+        newJoinerWindowMinutes: mod.new_joiner_window_minutes,
+        spamThreshold: mod.score_spam_threshold,
+        reviewMin: mod.score_review_min,
+      },
+      geminiApiKey,
+    );
+    const moderator = createModerator({
+      wa: whatsapp,
+      detector,
+      members: groupMembers,
+      actions: spamActions,
+      logger,
+      settings: {
+        enabled: mod.enabled,
+        enforceInGroups: mod.enforce_in_groups,
+        neverActionPhones: mod.never_action_phones,
+      },
+      alertGroupId: config.settings.reminders.worker_group_id,
+    });
+    whatsapp.onGroupMessage((m) => moderator.onGroupMessage(m));
+    whatsapp.onGroupJoin((ev) => moderator.onGroupJoin(ev));
+    logger.info({
+      source: 'startup',
+      eventType: 'moderation_enabled',
+      message: `spam moderation enabled; enforcing in ${mod.enforce_in_groups.length} group(s)`,
+    });
+  }
+
+  if (guideNotifyRunner) {
+    guideNotifyRunner.start();
+    logger.info({
+      source: 'startup',
+      eventType: 'guide_notify_enabled',
+      message: `guide pre-tour notifications enabled (${config.settings.guide_notify?.minutes_before}min before, ${config.guides.guides.length} guide(s) mapped)`,
+    });
   }
 
   whatsapp.onStateChange(async (s) => {

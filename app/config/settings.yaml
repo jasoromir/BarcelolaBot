@@ -29,6 +29,12 @@ notifications:
   proactive_warn_after_days: 12         # warn to re-link before the ~14d expiry window
   # Requires RESEND_API_KEY env var on the host. Defaults to Resend's sandbox
   # sender; set email_from to a verified-domain address for production.
+guide_notify:
+  enabled: true
+  minutes_before: 15            # send the guide their attendee list 15 min before tour start
+  poll_interval_seconds: 60     # check every minute for tours entering the send window
+  test_mode: false              # when true, send to test_group_id instead of the guide's phone
+  test_group_id: "120363425214664727@g.us"  # Barcelola BOT🌻 group (debug target)
 moderation:
   enabled: true
   # Enforcement (delete + kick) happens ONLY in these groups. Detection and

@@ -6,6 +6,8 @@ import {
   AllowlistConfigSchema,
   GroupsConfig,
   GroupsConfigSchema,
+  GuidesConfig,
+  GuidesConfigSchema,
   SettingsConfig,
   SettingsConfigSchema,
   TemplatesConfig,
@@ -21,9 +23,10 @@ export interface AppConfig {
   templates: TemplatesConfig;
   allowlist: AllowlistConfig;
   settings: SettingsConfig;
+  guides: GuidesConfig;
 }
 
-function readYaml<T>(filePath: string, schema: z.ZodType<T>): T {
+function readYaml<S extends z.ZodTypeAny>(filePath: string, schema: S): z.output<S> {
   const raw = fs.readFileSync(filePath, 'utf8');
   const parsed = yaml.load(raw);
   try {
@@ -51,11 +54,20 @@ export function loadConfig(configDir: string, opts: LoadConfigOpts = {}): AppCon
     }
     return path.join(configDir, name);
   };
+  // guides.yaml is optional: older deployments / test fixtures may not ship it.
+  // Fall back to an empty roster so the guide-notify job simply finds no
+  // targets rather than crashing config load.
+  const guidesPath = resolve('guides.yaml');
+  const guides = fs.existsSync(guidesPath)
+    ? readYaml(guidesPath, GuidesConfigSchema)
+    : { guides: [] };
+
   return {
     groups: readYaml(resolve('groups.yaml'), GroupsConfigSchema),
     tours: readYaml(resolve('tours.yaml'), ToursConfigSchema),
     templates: readYaml(resolve('templates.yaml'), TemplatesConfigSchema),
     allowlist: readYaml(resolve('allowlist.yaml'), AllowlistConfigSchema),
     settings: readYaml(resolve('settings.yaml'), SettingsConfigSchema),
+    guides,
   };
 }

@@ -98,6 +98,51 @@ const MIGRATIONS = [
   // ALTER TABLE is idempotent via the IGNORE approach: SQLite errors on a duplicate
   // column but we catch it in the migration runner below.
   `ALTER TABLE reminders ADD COLUMN order_id_ecom TEXT`,
+  // Spam moderation: track when each participant was first seen in each group so
+  // the detector can weight "first message from a brand-new joiner" — the
+  // strongest crypto-spam-bot signal. first_seen_at is set on group_join (or on
+  // the first message we observe from them if we missed the join event).
+  `CREATE TABLE IF NOT EXISTS group_members (
+     group_id TEXT NOT NULL,
+     participant_id TEXT NOT NULL,
+     first_seen_at TEXT NOT NULL,
+     joined_via TEXT NOT NULL,
+     PRIMARY KEY (group_id, participant_id)
+   )`,
+  // Audit trail of every moderation decision and action. Lets us review false
+  // positives during the test phase and tune thresholds.
+  `CREATE TABLE IF NOT EXISTS spam_actions (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     ts TEXT NOT NULL,
+     group_id TEXT NOT NULL,
+     participant_id TEXT NOT NULL,
+     phone TEXT,
+     message_id TEXT,
+     body TEXT NOT NULL,
+     score REAL NOT NULL,
+     verdict TEXT NOT NULL,
+     reasons TEXT,
+     enforced INTEGER NOT NULL DEFAULT 0,
+     deleted INTEGER NOT NULL DEFAULT 0,
+     kicked INTEGER NOT NULL DEFAULT 0,
+     error TEXT
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_spam_actions_ts ON spam_actions(ts DESC)`,
+  // Guide pre-tour roster notifications: one row per tour occurrence we've
+  // messaged the guide about, so the poller sends each roster exactly once.
+  // tour_key is the Wix eventId (or serviceId+startIso fallback).
+  `CREATE TABLE IF NOT EXISTS guide_notifications (
+     tour_key TEXT PRIMARY KEY,
+     guide_name TEXT,
+     guide_phone TEXT,
+     tour_title TEXT,
+     start_at_iso TEXT NOT NULL,
+     attendee_count INTEGER NOT NULL DEFAULT 0,
+     sent_at TEXT NOT NULL,
+     message_id TEXT,
+     status TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_guide_notifications_start ON guide_notifications(start_at_iso)`,
 ];
 
 const SEEDS: Array<[string, string]> = [

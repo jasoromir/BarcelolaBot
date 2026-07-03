@@ -1,4 +1,4 @@
-import type { Tour } from '../types.js';
+import type { Tour, GuideTourRoster, RosterAttendee } from '../types.js';
 import type {
   CancelBookingInput,
   CancelBookingResult,
@@ -329,6 +329,119 @@ export function createWixClient(opts: WixClientOpts): WixClient {
       return [...perSession.values()]
         .filter((t) => t.date === date)
         .sort((a, b) => a.startTime.localeCompare(b.startTime));
+    },
+
+    async getGuideRostersForDate(date: string): Promise<GuideTourRoster[]> {
+      // Query confirmed bookings whose tour starts within the requested local
+      // date via the extended-bookings v2 API. Unlike bookings/v1, this exposes
+      // bookedEntity.slot.resource (the assigned guide). We filter on startDate
+      // using a UTC window generous enough to cover the full local day (tours
+      // are Europe/Madrid = UTC+1/+2, so a day starting at the previous 22:00Z
+      // and ending at 22:00Z the next day covers all local-date sessions).
+      const dayStartUtc = new Date(`${date}T00:00:00.000+00:00`);
+      const fromIso = new Date(dayStartUtc.getTime() - 3 * 3600 * 1000).toISOString();
+      const toIso = new Date(dayStartUtc.getTime() + 27 * 3600 * 1000).toISOString();
+
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const perTour = new Map<string, GuideTourRoster>();
+        let cursor: string | undefined;
+        for (let page = 0; page < 20; page++) {
+          const res = await fetchFn(`${base}/_api/bookings-reader/v2/extended-bookings/query`, {
+            method: 'POST',
+            headers: {
+              Authorization: opts.apiKey,
+              'wix-site-id': opts.siteId,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              query: {
+                filter: {
+                  $and: [{ startDate: { $gte: fromIso } }, { startDate: { $lte: toIso } }],
+                },
+                cursorPaging: { limit: 100, ...(cursor ? { cursor } : {}) },
+              },
+            }),
+            signal: controller.signal,
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`guide rosters query failed ${res.status}: ${text.slice(0, 300)}`);
+          }
+          const data = (await res.json()) as {
+            extendedBookings?: Array<{
+              booking?: {
+                id: string;
+                status?: string;
+                startDate?: string;
+                totalParticipants?: number;
+                contactDetails?: WixContactDetails;
+                bookedEntity?: {
+                  title?: string;
+                  slot?: {
+                    serviceId?: string;
+                    eventId?: string;
+                    startDate?: string;
+                    resource?: { id?: string; name?: string };
+                  };
+                };
+              };
+            }>;
+            pagingMetadata?: { hasNext?: boolean; cursors?: { next?: string } };
+          };
+
+          for (const eb of data.extendedBookings ?? []) {
+            const b = eb.booking;
+            if (!b) continue;
+            if (b.status && b.status !== 'CONFIRMED' && b.status !== 'APPROVED') continue;
+            const slot = b.bookedEntity?.slot;
+            const startIso = b.startDate ?? slot?.startDate;
+            if (!startIso) continue;
+            // Keep only sessions whose LOCAL date matches the requested date.
+            if (toLocalDate(startIso, tz) !== date) continue;
+
+            const key = slot?.eventId ?? `${slot?.serviceId ?? 'unknown'}-${startIso}`;
+            const attendee: RosterAttendee = {
+              name: asName(b.contactDetails),
+              phone: b.contactDetails?.phone ?? '',
+              participants:
+                typeof b.totalParticipants === 'number' && b.totalParticipants > 0
+                  ? b.totalParticipants
+                  : 1,
+            };
+            const existing = perTour.get(key);
+            if (existing) {
+              existing.attendees.push(attendee);
+              existing.totalParticipants += attendee.participants;
+              if (!existing.guideName && slot?.resource?.name) {
+                existing.guideName = slot.resource.name;
+              }
+            } else {
+              perTour.set(key, {
+                serviceId: slot?.serviceId ?? 'unknown',
+                eventId: slot?.eventId,
+                tourTitle: b.bookedEntity?.title ?? 'Tour',
+                startAtIso: new Date(startIso).toISOString(),
+                startTimeLocal: toLocalTime(startIso, tz),
+                guideName: slot?.resource?.name,
+                attendees: [attendee],
+                totalParticipants: attendee.participants,
+              });
+            }
+          }
+
+          if (!data.pagingMetadata?.hasNext) break;
+          cursor = data.pagingMetadata?.cursors?.next;
+          if (!cursor) break;
+        }
+
+        return [...perTour.values()].sort((a, b) =>
+          a.startAtIso.localeCompare(b.startAtIso),
+        );
+      } finally {
+        clearTimeout(t);
+      }
     },
 
     async cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult> {

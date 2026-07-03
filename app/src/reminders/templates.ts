@@ -36,19 +36,28 @@ export interface ReminderTemplateInput {
   templates: TemplatesConfig;
   tours: ToursConfig;
   officialContactNumber: string;
+  /** Fallback Google Maps pin used when the tour has no google_maps_url of its own. */
+  defaultGoogleMapsUrl?: string;
   /** When the booking has a deposit, include a payment reminder line; omit otherwise. */
   depositLine?: string;
 }
 
 export function buildReminder24h(input: ReminderTemplateInput): string {
+  const tour = input.reminder.tourId ? input.tours.tours[input.reminder.tourId] : undefined;
   const tourName = resolveTourName(input.reminder, input.tours);
   const footer = antiReplyFooter(input.templates.anti_reply_footer, input.officialContactNumber);
+  // Meeting point + Google Maps pin, mirroring the morning/night broadcasts.
+  const meetingPoint = tour?.meeting_point_he ?? '';
+  const mapsUrl = tour?.google_maps_url ?? input.defaultGoogleMapsUrl;
+  const mapsUrlLine = mapsUrl ? `📍 ${mapsUrl}` : '';
   return interpolate(input.templates.reminder_24h, {
     client_name: input.reminder.clientName ?? 'Guest',
     tour_name_he: tourName,
     date: fmtDateDDMMYY(input.reminder.startAtIso),
     time: fmtTime(input.reminder.startAtIso),
     participant_count: String(input.reminder.participantCount),
+    meeting_point_he: meetingPoint,
+    maps_url_line: mapsUrlLine,
     official_contact_number: input.officialContactNumber,
     anti_reply_footer: footer,
     // Empty string when no deposit — the template `{deposit_line}` becomes invisible.

@@ -15,6 +15,7 @@ export interface ReminderRunnerDeps {
     pollIntervalSeconds: number;
     officialContactNumber: string;
     workerGroupId: string;
+    defaultGoogleMapsUrl?: string;
   };
   isPaused: () => boolean;
   isConnected: () => boolean;
@@ -58,6 +59,7 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
       templates: deps.config.templates,
       tours: deps.config.tours,
       officialContactNumber: deps.settings.officialContactNumber,
+      defaultGoogleMapsUrl: deps.settings.defaultGoogleMapsUrl,
       depositLine,
     });
     try {

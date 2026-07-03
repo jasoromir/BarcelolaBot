@@ -1,4 +1,6 @@
 night_header: |
+  🌻 https://www.barcelola-tours.com/barcelolatours
+
   *לילה טוב לכל המטיילים והמטיילות האהובים מ- Barcelola Tours ✨🌜*
 
   ❤️ *לנמצאים בברצלונה - הצטרפו לסיורי ברצלולה, מחר {weekday_he} ה-{date}* ❤️
@@ -6,6 +8,8 @@ night_header: |
   *סיורים חינם על בסיס טיפ בתוך העיר*
 
 morning_header: |
+  🌻 https://www.barcelola-tours.com/barcelolatours
+
   *בוקר טוב לכל המטיילים והמטיילות ☀️🌻*
   *היום {weekday_he} ה-{date} — הסיורים שיתקיימו:*
 
@@ -29,6 +33,9 @@ booking_confirmation: |
 
   זהו אישור הזמנה להרשמה לסיור *{tour_name_he}* בתאריך {date} בשעה {time} עבור {participant_count} משתתפים.
 
+  📍 *נקודת מפגש:* {meeting_point_he}
+  {maps_url_line}
+
   מצפים לראותכם!
 
   לבינתיים, הצטרפו לקבוצת הווטסאפ שלנו, שם תקבלו מידע על הסיורים והרבה טיפים והמלצות על ברצלונה ממדריכים מקומיים 🇪🇸
@@ -43,6 +50,9 @@ booking_confirmation_lt24h: |
   תודה שנרשמת לסיור שלנו! 🥳
 
   זהו אישור הזמנה להרשמה לסיור *{tour_name_he}* בתאריך {date} בשעה {time} עבור {participant_count} משתתפים.
+
+  📍 *נקודת מפגש:* {meeting_point_he}
+  {maps_url_line}
 
   ⏰ *הסיור מתקיים בקרוב!*
   אנא השיבו להודעה זו 👇
@@ -60,6 +70,9 @@ reminder_24h: |
   כאן ברצלולה 🌻
 
   ⏰ מזכירים שיש לכם סיור *{tour_name_he}* מחר בתאריך {date} בשעה {time}.
+
+  📍 *נקודת מפגש:* {meeting_point_he}
+  {maps_url_line}
   {deposit_line}
   אנא השיבו להודעה זו 👇
   ✅ *"מאשר"* — אם אתם מגיעים ({participant_count} משתתפים)
@@ -91,6 +104,9 @@ cancel_ack: |
 
 anti_reply_footer: |
   ⚠️ הערה: לכל שאלה או מידע נוסף, נא לא להשיב למספר זה, צרו קשר בטלפון {official_contact_number}.
+
+unmanaged_number_reply: |
+  מספר זה אינו מנוהל, אנא שאלו את שאלתכם ישירות בקבוצות הווטסאפ שלנו 🌻
 
 no_reply_alert: |
   ⚠️ *תזכורת: לא התקבלה תשובה*

@@ -471,7 +471,10 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   async function sendDirect(phoneE164: string, body: string): Promise<SendResult> {
     const digits = phoneE164.replace(/^\+/, '');
     const chatId = `${digits}@c.us`;
-    const msg = await client.sendMessage(chatId, body);
+    // Disable WhatsApp's auto link-preview card for customer DMs. The welcome,
+    // confirmation and reminder messages contain the website + group-invite
+    // links, and we don't want a big preview card attached to them.
+    const msg = await client.sendMessage(chatId, body, { linkPreview: false });
     return { messageId: msg.id._serialized };
   }
 

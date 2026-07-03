@@ -1,4 +1,10 @@
-mode: "explicit"
+# mode is the on/off flag for who receives booking confirmation DMs:
+#   open     -> ALL booking numbers (production behavior)
+#   explicit -> only the explicit_phones list below (test / rollback mode)
+# To disable for everyone again (e.g. if a bug appears), flip mode back to
+# "explicit" and reload config — the explicit_phones list is kept intact for
+# exactly that instant rollback.
+mode: "open"
 explicit_phones:
   - "+34675319188"  # Primary contact
   - "+34651886491"  # Secondary contact

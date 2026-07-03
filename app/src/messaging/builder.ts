@@ -64,6 +64,8 @@ export interface BookingConfirmationInput {
   combined?: boolean;
   /** Official contact number string shown in the anti-reply footer. */
   officialContactNumber: string;
+  /** Fallback Google Maps pin used when the tour has no google_maps_url of its own. */
+  defaultGoogleMapsUrl?: string;
 }
 
 export function buildBookingConfirmation(input: BookingConfirmationInput): string {
@@ -77,6 +79,11 @@ export function buildBookingConfirmation(input: BookingConfirmationInput): strin
     official_contact_number: input.officialContactNumber,
   });
 
+  // Meeting point + Google Maps pin, mirroring the morning/night broadcasts.
+  const meetingPointHe = cfg?.meeting_point_he ?? input.event.tourTitle ?? '';
+  const mapsUrl = cfg?.google_maps_url ?? input.defaultGoogleMapsUrl ?? '';
+  const mapsUrlLine = mapsUrl ? `📍 ${mapsUrl}` : '';
+
   const template = input.combined
     ? input.templates.booking_confirmation_lt24h
     : input.templates.booking_confirmation;
@@ -87,6 +94,8 @@ export function buildBookingConfirmation(input: BookingConfirmationInput): strin
     date: formattedDate,
     time: input.event.time,
     participant_count: String(input.event.participantCount || 1),
+    meeting_point_he: meetingPointHe,
+    maps_url_line: mapsUrlLine,
     official_contact_number: input.officialContactNumber,
     anti_reply_footer: footer,
   });

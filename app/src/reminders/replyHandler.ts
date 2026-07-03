@@ -42,9 +42,17 @@ interface PendingReply {
   timer: NodeJS.Timeout;
 }
 
+/** Throttle window for the "unmanaged number" auto-reply: after we send it to a
+ *  phone, we won't send it again for this long, so someone messaging non-stop
+ *  from an unmanaged number doesn't get spammed with identical replies. */
+const UNMANAGED_REPLY_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+
 export function createReplyHandler(deps: ReplyHandlerDeps) {
   const debounceMs = Math.max(0, (deps.settings.debounceSeconds ?? 0) * 1000);
   const buffers = new Map<string, PendingReply>();
+  // phone -> epoch ms of the last unmanaged-number auto-reply we sent. In-memory
+  // only: a restart resets it (worst case one extra reply after a redeploy).
+  const lastUnmanagedReplyAt = new Map<string, number>();
 
   async function flush(phone: string): Promise<void> {
     const pending = buffers.get(phone);
@@ -108,8 +116,25 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
     const reminder = deps.reminders.findActiveForReply(phone, nowIso);
 
     if (!reminder) {
-      // No active reminder: this customer has no upcoming tour. Ignore silently;
-      // the group-worker forwarding only applies to active bookings (per spec).
+      // No active reminder: this number isn't managed by the bot (no upcoming
+      // tour booked). Reply in Hebrew pointing them to the WhatsApp groups
+      // instead of running the classifier / worker-forward flow.
+      //
+      // Throttle: only send this auto-reply once per hour per phone, so someone
+      // messaging non-stop from an unmanaged number isn't spammed with identical
+      // replies. We still record every message in the audit log.
+      const lastReply = lastUnmanagedReplyAt.get(phone);
+      const throttled =
+        lastReply !== undefined && Date.now() - lastReply < UNMANAGED_REPLY_THROTTLE_MS;
+      if (!throttled) {
+        await safeSend(
+          deps,
+          phone,
+          deps.config.templates.unmanaged_number_reply,
+          'unmanaged_number_reply',
+        );
+        lastUnmanagedReplyAt.set(phone, Date.now());
+      }
       deps.audit.record({
         ts: nowIso,
         phone,
@@ -119,12 +144,14 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
         participantCount: null,
         confidence: null,
         forwarded: false,
-        notes: 'no_active_reminder',
+        notes: throttled ? 'no_active_reminder_throttled' : 'no_active_reminder_replied',
       });
       deps.logger.info({
         source: 'reply',
         eventType: 'no_active_reminder',
-        message: `incoming DM from ${phone} with no active reminder`,
+        message: throttled
+          ? `incoming DM from ${phone} with no active reminder; unmanaged-number reply throttled`
+          : `incoming DM from ${phone} with no active reminder; sent unmanaged-number reply`,
       });
       return;
     }

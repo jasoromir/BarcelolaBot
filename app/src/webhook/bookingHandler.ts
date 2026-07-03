@@ -135,6 +135,7 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
     templates: input.config.templates,
     combined,
     officialContactNumber: remindersCfg.official_contact_number,
+    defaultGoogleMapsUrl: remindersCfg.default_google_maps_url,
   });
 
   const r = await input.sender.send({ phone, body, bookingId: event.bookingId });

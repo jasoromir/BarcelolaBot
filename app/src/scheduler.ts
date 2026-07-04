@@ -5,6 +5,7 @@ import { runMorningJob } from './jobs/morningJob.js';
 
 export interface ScheduledTasks {
   nightly: cron.ScheduledTask;
+  nightlyFriday: cron.ScheduledTask | null;
   morning: cron.ScheduledTask;
   prune: cron.ScheduledTask;
   waHealth: cron.ScheduledTask;
@@ -13,23 +14,31 @@ export interface ScheduledTasks {
 export function startScheduler(app: App): ScheduledTasks {
   const tz = app.config.settings.timezone;
 
+  const nightlyFn = async () => {
+    await runNightlyJob({
+      config: app.config,
+      whatsapp: app.whatsapp,
+      wix: app.wix,
+      history: app.jobHistory,
+      reminders: app.reminders,
+      logger: app.logger,
+      dataDir: process.env.DATA_DIR ?? './data',
+      isPaused: () => app.controlState.isPaused(),
+      dryRun: false,
+    });
+  };
+
   const nightly = cron.schedule(
     app.config.settings.schedule.nightly_cron,
-    async () => {
-      await runNightlyJob({
-        config: app.config,
-        whatsapp: app.whatsapp,
-        wix: app.wix,
-        history: app.jobHistory,
-        reminders: app.reminders,
-        logger: app.logger,
-        dataDir: process.env.DATA_DIR ?? './data',
-        isPaused: () => app.controlState.isPaused(),
-        dryRun: false,
-      });
-    },
+    nightlyFn,
     { timezone: tz },
   );
+
+  // Friday early nightly (Shabbat Shalom) — same job, earlier time.
+  const fridayCron = app.config.settings.schedule.nightly_friday_cron;
+  const nightlyFriday = fridayCron
+    ? cron.schedule(fridayCron, nightlyFn, { timezone: tz })
+    : null;
 
   const morning = cron.schedule(
     app.config.settings.schedule.morning_cron,
@@ -116,5 +125,5 @@ export function startScheduler(app: App): ScheduledTasks {
     },
   });
 
-  return { nightly, morning, prune, waHealth };
+  return { nightly, nightlyFriday, morning, prune, waHealth };
 }

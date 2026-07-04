@@ -67,7 +67,7 @@ export const TemplatesConfigSchema = z.object({
   unmanaged_number_reply: z
     .string()
     .min(1)
-    .default('מספר זה אינו מנוהל, אנא שאלו את שאלתכם ישירות בקבוצות הווטסאפ שלנו 🌻'),
+    .default('מספר זה משמש להודעות אוטומטיות בלבד. נשמח אם תפנו את שאלותיכם ישירות לקבוצות הווטסאפ שלנו 🙏🌻'),
   no_reply_alert: z.string().min(1),
   worker_forward: z.string().min(1),
   cancel_notice: z.string().min(1),
@@ -87,6 +87,7 @@ export const SettingsConfigSchema = z.object({
   timezone: z.string().min(1),
   schedule: z.object({
     nightly_cron: CronSchema,
+    nightly_friday_cron: CronSchema.optional(),
     morning_cron: CronSchema,
   }),
   broadcast: z.object({

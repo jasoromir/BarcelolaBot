@@ -1,6 +1,7 @@
 timezone: "Europe/Madrid"
 schedule:
-  nightly_cron: "30 21 * * *"
+  nightly_cron: "30 21 * * 0-4,6"       # Sun-Thu + Sat at 21:30
+  nightly_friday_cron: "30 19 * * 5"    # Friday at 19:30 (Shabbat Shalom)
   morning_cron: "30 8 * * *"
 broadcast:
   mode: "production"

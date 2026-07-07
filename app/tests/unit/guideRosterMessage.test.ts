@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildGuideRosterMessage } from '../../src/messaging/guideRosterMessage.js';
+import {
+  buildGuideRosterMessage,
+  buildGuideDayBeforeReminder,
+} from '../../src/messaging/guideRosterMessage.js';
 import type { GuideTourRoster } from '../../src/types.js';
 
 const baseRoster: GuideTourRoster = {
@@ -55,5 +58,32 @@ describe('buildGuideRosterMessage', () => {
       roster: { ...baseRoster, attendees: [{ name: '', phone: '', participants: 1 }] },
     });
     expect(msg).toContain('• אורח/ת (1): —');
+  });
+});
+
+describe('buildGuideDayBeforeReminder', () => {
+  it('reminds of tomorrow, the time, 15-min-early, and headcount so far — without listing clients', () => {
+    const msg = buildGuideDayBeforeReminder({
+      roster: baseRoster,
+      tourNameHe: 'בורן טו בי וויילד',
+      meetingPointHe: 'Hard Rock Cafe, Plaça de Catalunya',
+      mapsUrl: 'https://maps.app.goo.gl/xyz',
+    });
+    expect(msg).toContain('היי ליאנה');
+    expect(msg).toContain('מחר');
+    expect(msg).toContain('*17:00*');
+    expect(msg).toContain('*בורן טו בי וויילד*');
+    expect(msg).toContain('Hard Rock Cafe, Plaça de Catalunya');
+    expect(msg).toContain('https://maps.app.goo.gl/xyz');
+    expect(msg).toContain('15 דקות');
+    expect(msg).toContain('*3* משתתפים');
+    // It must NOT include the per-client phone list (that's the pre-tour message).
+    expect(msg).not.toContain('+972543050555');
+  });
+
+  it('omits the meeting-point line when none is configured', () => {
+    const msg = buildGuideDayBeforeReminder({ roster: baseRoster });
+    expect(msg).not.toContain('נקודת מפגש');
+    expect(msg).toContain('15 דקות');
   });
 });

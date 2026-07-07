@@ -151,6 +151,13 @@ async function main(): Promise<void> {
             pollIntervalSeconds: gn.poll_interval_seconds,
             testMode: gn.test_mode ?? false,
             testGroupId: gn.test_group_id,
+            dayBefore: gn.day_before
+              ? {
+                  enabled: gn.day_before.enabled,
+                  sendTime: gn.day_before.send_time,
+                  guideNames: gn.day_before.guide_names,
+                }
+              : undefined,
           },
           timezone: config.settings.timezone,
           isPaused: () => controlState.isPaused(),

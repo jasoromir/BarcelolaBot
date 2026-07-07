@@ -136,6 +136,18 @@ export const SettingsConfigSchema = z.object({
       // When true, send to the test group instead of the guide's phone (debug).
       test_mode: z.boolean().optional(),
       test_group_id: GroupIdSchema.optional(),
+      // Optional day-before reminder, sent only to specific guides (by Wix
+      // resource name). Fires once per tour the evening before at send_time.
+      // Separate from the pre-tour roster; contains only headcount-so-far.
+      day_before: z
+        .object({
+          enabled: z.boolean(),
+          // Local (timezone) clock time HH:MM to send the evening before.
+          send_time: z.string().regex(/^\d{2}:\d{2}$/),
+          // Guide names (exact Wix resource name) who opted into this reminder.
+          guide_names: z.array(z.string().min(1)),
+        })
+        .optional(),
     })
     .optional(),
   moderation: z

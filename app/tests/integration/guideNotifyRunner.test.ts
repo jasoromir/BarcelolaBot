@@ -134,3 +134,72 @@ describe('guideNotifyRunner.tick', () => {
     expect(sent[0]!.to).toBe('120363425214664727@g.us');
   });
 });
+
+// A tomorrow tour (relative to the fixed now 2026-07-02): ~24h out, so it never
+// enters the pre-tour 15-min window — only the day-before pass acts on it.
+const rosterTomorrow: GuideTourRoster = {
+  serviceId: 'svc-1',
+  eventId: 'evt-tomorrow',
+  tourTitle: 'Born to be Wild',
+  startAtIso: '2026-07-03T15:00:00.000Z',
+  startTimeLocal: '17:00',
+  guideName: 'ליאנה',
+  attendees: [{ name: 'רוני טל', phone: '+972549000073', participants: 2 }],
+  totalParticipants: 2,
+};
+
+// now = 2026-07-02T16:00:00Z → 18:00 local (Europe/Madrid, UTC+2), so a
+// send_time of 18:00 has been reached.
+const dayBeforeSettings = {
+  minutesBefore: 15,
+  pollIntervalSeconds: 60,
+  testMode: false,
+  dayBefore: { enabled: true, sendTime: '18:00', guideNames: ['ליאנה'] },
+};
+
+describe('guideNotifyRunner day-before pass', () => {
+  it('sends a day-before reminder to an opted-in guide once send_time is reached', async () => {
+    const { runner, sent } = makeDeps([rosterTomorrow], {
+      settings: dayBeforeSettings,
+      now: () => new Date('2026-07-02T16:00:00.000Z'),
+    });
+    const stats = await runner.tick();
+    expect(stats.sent).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe('+34651886491');
+    expect(sent[0]!.body).toContain('מחר');
+    expect(sent[0]!.body).toContain('*2* משתתפים');
+    // Not the per-client roster message.
+    expect(sent[0]!.body).not.toContain('+972549000073');
+  });
+
+  it('does not send before send_time', async () => {
+    const { runner, sent } = makeDeps([rosterTomorrow], {
+      settings: dayBeforeSettings,
+      now: () => new Date('2026-07-02T13:00:00.000Z'), // 15:00 local < 18:00
+    });
+    const stats = await runner.tick();
+    expect(stats.due).toBe(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('does not send to a guide not on the day-before list', async () => {
+    const { runner, sent } = makeDeps([{ ...rosterTomorrow, guideName: 'עדי' }], {
+      settings: dayBeforeSettings,
+      now: () => new Date('2026-07-02T16:00:00.000Z'),
+    });
+    const stats = await runner.tick();
+    expect(stats.sent).toBe(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('dedups the day-before reminder (fires once)', async () => {
+    const { runner, sent } = makeDeps([rosterTomorrow], {
+      settings: dayBeforeSettings,
+      now: () => new Date('2026-07-02T16:00:00.000Z'),
+    });
+    await runner.tick();
+    await runner.tick();
+    expect(sent).toHaveLength(1);
+  });
+});

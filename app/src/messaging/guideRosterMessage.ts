@@ -47,3 +47,49 @@ export function buildGuideRosterMessage(opts: BuildGuideRosterOpts): string {
 
   return lines.join('\n');
 }
+
+export interface BuildGuideDayBeforeOpts {
+  roster: GuideTourRoster;
+  /** Hebrew display name of the tour (from tours.yaml); falls back to Wix title. */
+  tourNameHe?: string;
+  /** Hebrew meeting-point text (from tours.yaml); omitted from message when blank. */
+  meetingPointHe?: string;
+  /** Optional Google Maps pin for the meeting point; appended when provided. */
+  mapsUrl?: string;
+}
+
+/**
+ * Builds the Hebrew day-before reminder for a guide: reminds them that tomorrow
+ * at a given time they have a tour, to be at the meeting point at least 15 min
+ * early, and how many people are booked SO FAR (numbers can still change with
+ * last-minute bookings/cancellations — the full list comes in the pre-tour
+ * roster message ~15 min before start).
+ */
+export function buildGuideDayBeforeReminder(opts: BuildGuideDayBeforeOpts): string {
+  const { roster } = opts;
+  const tourName = opts.tourNameHe?.trim() || roster.tourTitle;
+  const greetName = roster.guideName ? ` ${roster.guideName}` : '';
+  const meetingPoint = opts.meetingPointHe?.trim();
+
+  const lines: string[] = [];
+  lines.push(`היי${greetName} 👋`);
+  lines.push('תזכורת לסיור של מחר 🗓️');
+  lines.push('');
+  lines.push(`🚩 *${tourName}*`);
+  lines.push(`🕒 מחר בשעה *${roster.startTimeLocal}*`);
+  if (meetingPoint) {
+    lines.push(`📍 נקודת מפגש: ${meetingPoint}`);
+    if (opts.mapsUrl) lines.push(opts.mapsUrl);
+  }
+  lines.push('');
+  lines.push('⏰ *חשוב להגיע לנקודת המפגש לפחות 15 דקות לפני תחילת הסיור.*');
+  lines.push('');
+  lines.push(
+    `👥 נכון לעכשיו רשומים *${roster.totalParticipants}* משתתפים (${roster.attendees.length} הזמנות).`,
+  );
+  lines.push('המספר עשוי להשתנות עד מועד הסיור — הרשימה המלאה תישלח כ-15 דקות לפני ההתחלה.');
+  lines.push('');
+  lines.push('סיור נעים! 🎉');
+
+  return lines.join('\n');
+}

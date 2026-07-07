@@ -36,6 +36,11 @@ guide_notify:
   poll_interval_seconds: 60     # check every minute for tours entering the send window
   test_mode: false              # when true, send to test_group_id instead of the guide's phone
   test_group_id: "120363425214664727@g.us"  # Barcelola BOT🌻 group (debug target)
+  day_before:                   # optional day-before reminder, only for listed guides
+    enabled: true
+    send_time: "18:00"          # local (Europe/Madrid) time to send the evening before
+    guide_names:
+      - "אדיר"                  # aka רידא — requested the day-before reminder
 moderation:
   enabled: true
   # Enforcement (delete + kick) happens ONLY in these groups. Detection and

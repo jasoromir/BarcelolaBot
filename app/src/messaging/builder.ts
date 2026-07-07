@@ -42,12 +42,19 @@ export function buildBroadcastMessage(input: BroadcastInput): string {
     const meetingPointHe = cfg?.meeting_point_he ?? t.location ?? '';
     const mapsUrl = cfg?.google_maps_url ?? '';
     const mapsUrlLine = mapsUrl ? `📍 ${mapsUrl}` : '';
+    // Meeting time = tour start minus 10 minutes
+    const [hh, mm] = t.startTime.split(':').map(Number);
+    const totalMin = hh! * 60 + mm! - 10;
+    const meetH = String(Math.floor(totalMin / 60)).padStart(2, '0');
+    const meetM = String(totalMin % 60).padStart(2, '0');
+    const meetingTime = `${meetH}:${meetM}`;
     const block = interpolate(input.templates.tour_block, {
       emoji,
       time_range: `${t.startTime}-${t.endTime}`,
       name_he: nameHe,
       description_he: descriptionHe,
       meeting_point_he: meetingPointHe,
+      meeting_time: meetingTime,
       maps_url_line: mapsUrlLine,
     });
     parts.push(block);

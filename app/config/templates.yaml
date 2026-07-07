@@ -23,7 +23,7 @@ tour_block: |
   {emoji} {time_range}
   *{name_he}*
   {description_he}
-  *נקודת ושעת מפגש* - {meeting_point_he}
+  *נקודת מפגש:* נפגשים ב-{meeting_point_he} בשעה {meeting_time}
   {maps_url_line}
 
 booking_confirmation: |
@@ -106,7 +106,7 @@ anti_reply_footer: |
   ⚠️ הערה: לכל שאלה או מידע נוסף, נא לא להשיב למספר זה, צרו קשר בטלפון {official_contact_number}.
 
 unmanaged_number_reply: |
-  מספר זה אינו מנוהל, אנא שאלו את שאלתכם ישירות בקבוצות הווטסאפ שלנו 🌻
+  מספר זה משמש להודעות אוטומטיות בלבד. נשמח אם תפנו את שאלותיכם ישירות לקבוצות הווטסאפ שלנו 🙏🌻
 
 no_reply_alert: |
   ⚠️ *תזכורת: לא התקבלה תשובה*

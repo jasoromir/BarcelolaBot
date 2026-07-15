@@ -5,7 +5,8 @@ export type ReminderStatus =
   | 'awaiting_reply' // reminder/combined DM sent, waiting for client
   | 'confirmed'
   | 'cancelled'
-  | 'no_reply'; // tour time passed without response
+  | 'no_reply' // tour time passed without response
+  | 'skipped_undelivered_welcome'; // welcome DM confirmed NOT delivered — reminder deliberately not sent
 
 export interface ReminderRow {
   bookingId: string;
@@ -21,6 +22,8 @@ export interface ReminderRow {
   sendAtIso: string | null;
   sentAtIso: string | null;
   lastReplyTs: string | null;
+  /** null = not yet checked, true = welcome DM confirmed delivered (ack>=2), false = confirmed NOT delivered. */
+  welcomeDelivered: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +41,7 @@ interface DBRow {
   send_at_iso: string | null;
   sent_at_iso: string | null;
   last_reply_ts: string | null;
+  welcome_delivered: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +60,7 @@ function rowToReminder(r: DBRow): ReminderRow {
     sendAtIso: r.send_at_iso,
     sentAtIso: r.sent_at_iso,
     lastReplyTs: r.last_reply_ts,
+    welcomeDelivered: r.welcome_delivered === null ? null : r.welcome_delivered === 1,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -177,6 +182,30 @@ export class RemindersStore {
          WHERE booking_id = ?`,
       )
       .run(nowIso, nowIso, bookingId);
+  }
+
+  /** Record whether the welcome/confirmation DM for this booking was confirmed delivered (ack>=2). */
+  setWelcomeDelivered(bookingId: string, delivered: boolean): void {
+    this.db
+      .prepare(
+        `UPDATE reminders
+         SET welcome_delivered = ?, updated_at = ?
+         WHERE booking_id = ?`,
+      )
+      .run(delivered ? 1 : 0, new Date().toISOString(), bookingId);
+  }
+
+  /**
+   * Has this phone number ever had a DM confirmed delivered (any booking)?
+   * Used to gate first-contact sends while the linked-device account is under
+   * a WhatsApp anti-spam "new chat" restriction — established contacts are
+   * unaffected, only brand-new numbers trip the restriction.
+   */
+  hasConfirmedDelivery(phone: string): boolean {
+    const row = this.db
+      .prepare(`SELECT 1 FROM reminders WHERE phone = ? AND welcome_delivered = 1 LIMIT 1`)
+      .get(phone);
+    return row !== undefined;
   }
 
   setStatus(

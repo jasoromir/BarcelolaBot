@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../../src/persistence/db.js';
 import { WebhookDedup } from '../../src/persistence/webhookDedup.js';
 import { PendingDms } from '../../src/persistence/pendingDms.js';
+import { RemindersStore } from '../../src/persistence/reminders.js';
 import { EventLog } from '../../src/persistence/eventLog.js';
 import { createLogger } from '../../src/log/logger.js';
 import { DirectMessageSender } from '../../src/messaging/directMessage.js';
@@ -95,12 +96,13 @@ function freshInfra() {
   const eventLog = new EventLog(db);
   const dedup = new WebhookDedup(db);
   const pending = new PendingDms(db);
+  const reminders = new RemindersStore(db);
   const logger = createLogger({
     eventLog,
     logDir: path.join(os.tmpdir(), `wabot-wh-logs-${Date.now()}`),
     consoleLevel: 'silent',
   });
-  return { dedup, pending, logger };
+  return { dedup, pending, reminders, logger };
 }
 
 describe('handleBookingWebhook', () => {
@@ -171,5 +173,62 @@ describe('handleBookingWebhook', () => {
     });
     expect(result.outcome).toBe('deferred');
     expect(pending.pending()).toHaveLength(1);
+  });
+
+  it('persists welcome_delivered=true on the reminder row once delivery is confirmed', async () => {
+    const { dedup, pending, reminders, logger } = freshInfra();
+    const client = fakeClient();
+    const sender = new DirectMessageSender({
+      client, pendingDms: pending,
+      allowlist: () => fakeConfig('open').allowlist,
+      retry: { attempts: 1, backoffMs: [] },
+    });
+    const cfg = fakeConfig('open');
+    cfg.settings.reminders.enabled = true;
+    const result = await handleBookingWebhook({
+      payload: fixture,
+      config: cfg,
+      dedup,
+      sender,
+      logger,
+      isPaused: () => false,
+      reminders,
+      notifyDelivery: {
+        confirmAndAnnounce: async () => ({ status: 'delivered' }),
+      },
+    });
+    expect(result.outcome).toBe('sent');
+    // confirmAndAnnounce is fire-and-forget; flush the microtask queue.
+    await new Promise((r) => setImmediate(r));
+    const row = reminders.get(fixture.data.booking.id);
+    expect(row?.welcomeDelivered).toBe(true);
+  });
+
+  it('persists welcome_delivered=false when delivery is not confirmed', async () => {
+    const { dedup, pending, reminders, logger } = freshInfra();
+    const client = fakeClient();
+    const sender = new DirectMessageSender({
+      client, pendingDms: pending,
+      allowlist: () => fakeConfig('open').allowlist,
+      retry: { attempts: 1, backoffMs: [] },
+    });
+    const cfg = fakeConfig('open');
+    cfg.settings.reminders.enabled = true;
+    const result = await handleBookingWebhook({
+      payload: fixture,
+      config: cfg,
+      dedup,
+      sender,
+      logger,
+      isPaused: () => false,
+      reminders,
+      notifyDelivery: {
+        confirmAndAnnounce: async () => ({ status: 'not_delivered' }),
+      },
+    });
+    expect(result.outcome).toBe('sent');
+    await new Promise((r) => setImmediate(r));
+    const row = reminders.get(fixture.data.booking.id);
+    expect(row?.welcomeDelivered).toBe(false);
   });
 });

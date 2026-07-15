@@ -24,4 +24,16 @@ describe('ControlStateService', () => {
     s.resume();
     expect(s.isPaused()).toBe(false);
   });
+
+  it('defaults new-contact restriction to true (unset = restricted)', () => {
+    expect(svc().isNewContactRestricted()).toBe(true);
+  });
+
+  it('setNewContactRestricted persists and returns', () => {
+    const s = svc();
+    s.setNewContactRestricted(false);
+    expect(s.isNewContactRestricted()).toBe(false);
+    s.setNewContactRestricted(true);
+    expect(s.isNewContactRestricted()).toBe(true);
+  });
 });

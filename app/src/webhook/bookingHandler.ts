@@ -24,6 +24,15 @@ export interface HandleInput {
   logger: AppLogger;
   isPaused: () => boolean;
   reminders?: RemindersStore;
+  /** Confirms delivery of the sent DM and pings the worker group. Optional. */
+  notifyDelivery?: {
+    confirmAndAnnounce(input: {
+      messageId: string;
+      phone: string;
+      kind: string;
+      name: string;
+    }): Promise<{ status: string }>;
+  };
 }
 
 export async function handleBookingWebhook(input: HandleInput): Promise<HandlerOutcome> {
@@ -163,6 +172,7 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
           sendAtIso,
           sentAtIso: combined ? new Date().toISOString() : null,
           lastReplyTs: null,
+          welcomeDelivered: null,
         });
         input.logger.info({
           source: 'reminder',
@@ -179,6 +189,33 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
         message: `confirmation sent for ${event.bookingId}`,
         metadata: { phone, bookingId: event.bookingId },
       });
+      // Confirm delivery (ack) and ping the worker group — but do NOT block the
+      // Wix webhook response on the up-to-20s ack poll. Fire-and-forget.
+      // Also persist the delivered/not-delivered outcome on the reminder row so
+      // the day-before reminder runner can skip anyone whose welcome never
+      // actually reached them (see RemindersStore.setWelcomeDelivered).
+      if (input.notifyDelivery) {
+        void input.notifyDelivery
+          .confirmAndAnnounce({
+            messageId: r.messageId,
+            phone,
+            kind: combined ? 'welcome + confirmation' : 'welcome',
+            name: event.clientName,
+          })
+          .then((result) => {
+            if (reminders) {
+              reminders.setWelcomeDelivered(event.bookingId, result.status === 'delivered');
+            }
+          })
+          .catch((err) =>
+            input.logger.error({
+              source: 'webhook',
+              eventType: 'delivery_confirm_failed',
+              message: (err as Error).message,
+              metadata: { bookingId: event.bookingId },
+            }),
+          );
+      }
       return { outcome: 'sent' };
     case 'skipped_allowlist':
       input.dedup.complete(event.bookingId, 'skipped_allowlist');

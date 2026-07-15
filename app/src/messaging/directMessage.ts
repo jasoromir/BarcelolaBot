@@ -18,6 +18,10 @@ export interface DirectMessageSenderOpts {
   retry: RetryOpts | (() => RetryOpts);
   maxDrainAttempts?: number;
   isPaused?: () => boolean;
+  /** True while WhatsApp has restricted this account from starting new chats. */
+  isNewContactRestricted?: () => boolean;
+  /** Has this phone ever had a DM confirmed delivered? Used with isNewContactRestricted. */
+  hasConfirmedDelivery?: (phone: string) => boolean;
 }
 
 export interface SendInput {
@@ -39,6 +43,22 @@ export class DirectMessageSender {
     }
     if (!allowlistAllows(this.opts.allowlist(), input.phone)) {
       return { outcome: 'skipped_allowlist' };
+    }
+    // WhatsApp has restricted this account from starting new chats (2026-07-07
+    // anti-spam flag). Established contacts keep working normally — only a
+    // phone we've never successfully delivered to before gets held, so we
+    // don't keep tripping the restriction. It drains automatically via
+    // drainPending once the restriction is lifted (see /admin toggle).
+    if (
+      this.opts.isNewContactRestricted?.() &&
+      !this.opts.hasConfirmedDelivery?.(input.phone)
+    ) {
+      const id = this.opts.pendingDms.enqueue({
+        phone: input.phone,
+        body: input.body,
+        bookingId: input.bookingId,
+      });
+      return { outcome: 'deferred', queueId: id };
     }
     const state = this.opts.client.state();
     if (state.kind !== 'connected') {
@@ -65,10 +85,15 @@ export class DirectMessageSender {
     const items = this.opts.pendingDms.pending();
     for (const item of items) {
       try {
-        await retry(
-          () => this.opts.client.sendDirect(item.phone, item.body),
-          this.retryOpts(),
-        );
+        // Single attempt, no backoff — this is a bulk catch-up sweep over a
+        // (possibly multi-day) backlog, not a live send. Using the full
+        // production retry policy here (up to 3 attempts x 900s backoff) lets
+        // one permanently-broken number (e.g. a recipient hard-failing with
+        // "No LID for user") stall every item behind it in the shared send
+        // queue for hours, since sends are globally serialized. A failed item
+        // just increments its attempt count and gets picked up by the next
+        // drain (next reconnect or admin toggle) instead.
+        await this.opts.client.sendDirect(item.phone, item.body);
         this.opts.pendingDms.markSent(item.id);
         stats.sent += 1;
       } catch (err) {

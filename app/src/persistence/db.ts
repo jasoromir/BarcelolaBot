@@ -143,6 +143,66 @@ const MIGRATIONS = [
      status TEXT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS idx_guide_notifications_start ON guide_notifications(start_at_iso)`,
+  // Was the welcome/confirmation DM for this booking actually confirmed
+  // delivered (ack>=2), not just handed to the WhatsApp library without
+  // erroring? NULL = not yet checked, 1 = delivered, 0 = not delivered. Set by
+  // deliveryNotifier.confirmAndAnnounce. The day-before reminder runner skips
+  // sending if this is explicitly 0 — no point reminding someone about a tour
+  // when we know the original welcome never reached them.
+  `ALTER TABLE reminders ADD COLUMN welcome_delivered INTEGER`,
+  // Private (custom, non-catalog) tour bookings sourced from the
+  // guidesbarcelola@gmail.com Google Calendar (purple/colorId=3 events),
+  // LLM-parsed into structured fields. content_hash lets a daily sync skip
+  // events whose summary/description/location/time haven't changed since the
+  // last parse, since parsing costs LLM quota.
+  `CREATE TABLE IF NOT EXISTS private_tour_events (
+     event_id TEXT PRIMARY KEY,
+     content_hash TEXT NOT NULL,
+     start_at_iso TEXT NOT NULL,
+     end_at_iso TEXT NOT NULL,
+     raw_summary TEXT NOT NULL,
+     raw_description TEXT,
+     raw_location TEXT,
+     tour_name TEXT,
+     guide_name TEXT,
+     client_name TEXT,
+     people_count TEXT,
+     phone TEXT,
+     email TEXT,
+     meeting_point TEXT,
+     parsed_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_private_tour_events_start ON private_tour_events(start_at_iso)`,
+  // Dedup store for the private-tour day-before notify runner — one row per
+  // event we've attempted to notify about, so the poller sends exactly once.
+  `CREATE TABLE IF NOT EXISTS private_tour_notifications (
+     event_id TEXT PRIMARY KEY,
+     guide_name TEXT,
+     guide_phones TEXT,
+     manager_phone TEXT,
+     recipients TEXT NOT NULL,
+     tour_name TEXT,
+     start_at_iso TEXT NOT NULL,
+     missing_fields TEXT,
+     sent_at TEXT NOT NULL,
+     status TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_private_tour_notifications_start ON private_tour_notifications(start_at_iso)`,
+  // Dedup store for guide-photo forwarding: one row per (source message,
+  // target chat) pair we've forwarded, so re-running the nightly job or the
+  // manual /admin/api/guide-photos/forward-raw trigger never resends the same
+  // photo to the same group twice. filehash lets us also catch the case where
+  // the SAME image was uploaded to the source group more than once under a
+  // different message id.
+  `CREATE TABLE IF NOT EXISTS guide_photo_forwards (
+     source_message_id TEXT NOT NULL,
+     target_chat_id TEXT NOT NULL,
+     filehash TEXT,
+     forwarded_at TEXT NOT NULL,
+     PRIMARY KEY (source_message_id, target_chat_id)
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_guide_photo_forwards_filehash ON guide_photo_forwards(filehash, target_chat_id)`,
 ];
 
 const SEEDS: Array<[string, string]> = [

@@ -7,6 +7,7 @@ import { JobHistory } from '../../src/persistence/jobHistory.js';
 import { WebhookDedup } from '../../src/persistence/webhookDedup.js';
 import { PendingDms } from '../../src/persistence/pendingDms.js';
 import { ControlState } from '../../src/persistence/controlState.js';
+import { RemindersStore } from '../../src/persistence/reminders.js';
 
 function freshDb() {
   return openDatabase(
@@ -60,5 +61,53 @@ describe('ControlState', () => {
     expect(c.get('automations_paused')).toBe('false');
     c.set('automations_paused', 'true');
     expect(c.get('automations_paused')).toBe('true');
+  });
+});
+
+describe('RemindersStore welcome-delivered tracking', () => {
+  function baseRow(bookingId: string, phone: string) {
+    return {
+      bookingId,
+      orderIdEcom: null,
+      phone,
+      clientName: 'Dana',
+      tourId: null,
+      tourNameHe: 'Gaudi',
+      startAtIso: '2026-08-01T09:00:00.000Z',
+      participantCount: 1,
+      status: 'awaiting_reply' as const,
+      sendAtIso: null,
+      sentAtIso: new Date().toISOString(),
+      lastReplyTs: null,
+      welcomeDelivered: null,
+    };
+  }
+
+  it('welcomeDelivered starts null and hasConfirmedDelivery is false until set true', () => {
+    const r = new RemindersStore(freshDb());
+    r.upsert(baseRow('b1', '+972500000001'));
+    expect(r.get('b1')?.welcomeDelivered).toBeNull();
+    expect(r.hasConfirmedDelivery('+972500000001')).toBe(false);
+
+    r.setWelcomeDelivered('b1', true);
+    expect(r.get('b1')?.welcomeDelivered).toBe(true);
+    expect(r.hasConfirmedDelivery('+972500000001')).toBe(true);
+  });
+
+  it('hasConfirmedDelivery stays false for a phone whose welcome failed', () => {
+    const r = new RemindersStore(freshDb());
+    r.upsert(baseRow('b2', '+972500000002'));
+    r.setWelcomeDelivered('b2', false);
+    expect(r.get('b2')?.welcomeDelivered).toBe(false);
+    expect(r.hasConfirmedDelivery('+972500000002')).toBe(false);
+  });
+
+  it('hasConfirmedDelivery is true if ANY booking for that phone delivered, even if others did not', () => {
+    const r = new RemindersStore(freshDb());
+    r.upsert(baseRow('b3', '+972500000003'));
+    r.upsert(baseRow('b4', '+972500000003'));
+    r.setWelcomeDelivered('b3', false);
+    r.setWelcomeDelivered('b4', true);
+    expect(r.hasConfirmedDelivery('+972500000003')).toBe(true);
   });
 });

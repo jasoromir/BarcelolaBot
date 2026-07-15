@@ -10,7 +10,10 @@ export interface ReminderRunnerDeps {
   wix: WixClient;
   reminders: RemindersStore;
   logger: AppLogger;
-  config: { templates: TemplatesConfig; tours: ToursConfig };
+  /** Getter, not a static snapshot — so a config reload (e.g. hand-edited
+   *  templates/tours after a hot reload) is picked up on the next tick
+   *  instead of staying frozen at whatever was loaded at startup. */
+  config: () => { templates: TemplatesConfig; tours: ToursConfig };
   settings: {
     pollIntervalSeconds: number;
     officialContactNumber: string;
@@ -19,6 +22,15 @@ export interface ReminderRunnerDeps {
   };
   isPaused: () => boolean;
   isConnected: () => boolean;
+  /** Confirms delivery of the sent reminder and pings the worker group. Optional. */
+  notifyDelivery?: {
+    confirmAndAnnounce(input: {
+      messageId: string;
+      phone: string;
+      kind: string;
+      name: string;
+    }): Promise<unknown>;
+  };
 }
 
 export interface ReminderRunner {
@@ -33,9 +45,27 @@ export interface ReminderRunner {
 export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
   let handle: NodeJS.Timeout | null = null;
 
-  async function sendOne(r: ReminderRow): Promise<'sent' | 'deferred' | 'failed'> {
+  async function sendOne(
+    r: ReminderRow,
+  ): Promise<'sent' | 'deferred' | 'failed' | 'skipped_undelivered_welcome'> {
     if (!deps.isConnected()) return 'deferred';
     if (deps.isPaused()) return 'deferred';
+    // The original welcome/confirmation DM for this booking was confirmed NOT
+    // delivered (ack never reached the device) — sending a day-before reminder
+    // on top of that would be a second automated message to a number we
+    // already know the bot can't reach, which only makes the WhatsApp
+    // anti-spam "new chat" restriction worse. Skip; staff were already
+    // alerted to contact this customer manually when the welcome failed.
+    if (r.welcomeDelivered === false) {
+      deps.reminders.setStatus(r.bookingId, 'skipped_undelivered_welcome');
+      deps.logger.info({
+        source: 'reminder',
+        eventType: 'reminder_skipped_undelivered_welcome',
+        message: `skipping 24h reminder for ${r.bookingId} — welcome was never confirmed delivered`,
+        metadata: { phone: r.phone, bookingId: r.bookingId },
+      });
+      return 'skipped_undelivered_welcome';
+    }
 
     // Look up deposit/balance info if this booking has an eCommerce order ID.
     // Failure is non-fatal — we fall back to no deposit line rather than
@@ -54,16 +84,17 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
       }
     }
 
+    const cfg = deps.config();
     const body = buildReminder24h({
       reminder: r,
-      templates: deps.config.templates,
-      tours: deps.config.tours,
+      templates: cfg.templates,
+      tours: cfg.tours,
       officialContactNumber: deps.settings.officialContactNumber,
       defaultGoogleMapsUrl: deps.settings.defaultGoogleMapsUrl,
       depositLine,
     });
     try {
-      await deps.wa.sendDirect(r.phone, body);
+      const sendResult = await deps.wa.sendDirect(r.phone, body);
       deps.reminders.markSent(r.bookingId, new Date().toISOString());
       deps.logger.info({
         source: 'reminder',
@@ -71,6 +102,25 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
         message: `sent 24h reminder for ${r.bookingId}`,
         metadata: { phone: r.phone, bookingId: r.bookingId },
       });
+      // Confirm delivery (ack) and ping the worker group in the background so the
+      // poll loop isn't blocked on the up-to-20s ack wait.
+      if (deps.notifyDelivery) {
+        void deps.notifyDelivery
+          .confirmAndAnnounce({
+            messageId: sendResult.messageId,
+            phone: r.phone,
+            kind: 'reminder',
+            name: r.clientName ?? r.phone,
+          })
+          .catch((err) =>
+            deps.logger.error({
+              source: 'reminder',
+              eventType: 'delivery_confirm_failed',
+              message: (err as Error).message,
+              metadata: { bookingId: r.bookingId },
+            }),
+          );
+      }
       return 'sent';
     } catch (err) {
       deps.logger.error({
@@ -125,7 +175,7 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
       const list = rows
         .map((r) => `• ${r.clientName ?? 'Guest'} (${r.phone}) — ${r.participantCount} משתתפים`)
         .join('\n');
-      const body = deps.config.templates.no_reply_alert
+      const body = deps.config().templates.no_reply_alert
         .replaceAll('{tour_name_he}', tourName ?? '(unknown)')
         .replaceAll('{date}', date)
         .replaceAll('{time}', time)

@@ -9,6 +9,7 @@ export interface ScheduledTasks {
   morning: cron.ScheduledTask;
   prune: cron.ScheduledTask;
   waHealth: cron.ScheduledTask;
+  privateTourSync: cron.ScheduledTask | null;
 }
 
 export function startScheduler(app: App): ScheduledTasks {
@@ -23,6 +24,12 @@ export function startScheduler(app: App): ScheduledTasks {
       reminders: app.reminders,
       logger: app.logger,
       dataDir: process.env.DATA_DIR ?? './data',
+      forwardGuidePhotos: app.guidePhotosCollector
+        ? (targetChatId: string) => app.guidePhotosCollector!.forwardAllTo(
+            targetChatId,
+            (chatId, media, caption) => app.whatsapp.sendMediaToGroup(chatId, media, caption).then(() => {}),
+          )
+        : undefined,
       isPaused: () => app.controlState.isPaused(),
       dryRun: false,
     });
@@ -115,6 +122,27 @@ export function startScheduler(app: App): ScheduledTasks {
     { timezone: tz },
   );
 
+  // Daily private-tour sync (fetch + LLM-parse new/changed bookings from the
+  // Google Calendar). Independent of the day-before notify poller, which is
+  // started separately in index.ts.
+  const ptSync = app.config.settings.private_tours;
+  const privateTourSync =
+    ptSync?.enabled && ptSync.sync?.enabled && app.runPrivateTourSync
+      ? cron.schedule(
+          ptSync.sync.cron,
+          () => {
+            app.runPrivateTourSync!().catch((err) =>
+              app.logger.error({
+                source: 'scheduler',
+                eventType: 'private_tour_sync_failed',
+                message: (err as Error).message,
+              }),
+            );
+          },
+          { timezone: tz },
+        )
+      : null;
+
   app.logger.info({
     source: 'scheduler',
     eventType: 'scheduler_started',
@@ -125,5 +153,5 @@ export function startScheduler(app: App): ScheduledTasks {
     },
   });
 
-  return { nightly, nightlyFriday, morning, prune, waHealth };
+  return { nightly, nightlyFriday, morning, prune, waHealth, privateTourSync };
 }

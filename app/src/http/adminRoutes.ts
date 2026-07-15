@@ -52,6 +52,7 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       phone: state.kind === 'connected' ? state.phone : null,
       qrDataUrl: state.kind === 'qr_pending' ? state.qrDataUrl : null,
       paused: app.controlState.isPaused(),
+      newContactRestricted: app.controlState.isNewContactRestricted(),
       broadcastMode: app.config.settings.broadcast.mode,
       testGroupId: app.config.settings.broadcast.test_group_id,
       groupsCount: app.config.groups.groups.filter((g) => g.active).length,
@@ -97,6 +98,20 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     res.json({ ok: true, paused: false });
   });
 
+  // WhatsApp's linked-device "new chat" anti-spam restriction. While true,
+  // DMs to phones never confirmed-delivered before are held in the pending
+  // queue instead of sent (see DirectMessageSender.send). Clearing it drains
+  // any held first-contact DMs immediately.
+  exp.post('/admin/api/new-contact-restriction', async (req, res) => {
+    const restricted = Boolean(req.body?.restricted);
+    app.controlState.setNewContactRestricted(restricted);
+    let drained: { sent: number; failed: number; abandoned: number } | null = null;
+    if (!restricted) {
+      drained = await app.dmSender.drainPending();
+    }
+    res.json({ ok: true, restricted, drained });
+  });
+
   exp.post('/admin/api/jobs/nightly', async (req, res) => {
     const dryRun = Boolean(req.body?.dry_run);
     const result = await runNightlyJob({
@@ -125,6 +140,33 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       dryRun,
     });
     res.json({ result });
+  });
+
+  // ---- Private tours (Google Calendar) --------------------------------------
+  exp.post('/admin/api/jobs/private-tour-sync', async (_req, res) => {
+    if (!app.runPrivateTourSync) {
+      res.status(400).json({ error: 'private_tours.sync not enabled or misconfigured' });
+      return;
+    }
+    const result = await app.runPrivateTourSync();
+    res.json({ result });
+  });
+
+  exp.post('/admin/api/private-tours/notify-now', async (_req, res) => {
+    if (!app.privateTourNotifyRunner) {
+      res.status(400).json({ error: 'private_tours.notify not enabled' });
+      return;
+    }
+    const result = await app.privateTourNotifyRunner.tick();
+    res.json({ ok: true, result });
+  });
+
+  exp.get('/admin/api/private-tours', (req, res) => {
+    const limit = Math.min(Number((req.query.limit as string) ?? 50), 200);
+    const rows = app.db
+      .prepare('SELECT * FROM private_tour_events ORDER BY start_at_iso DESC LIMIT ?')
+      .all(limit);
+    res.json({ events: rows });
   });
 
   async function bulkGroupAction(action: 'close' | 'open', res: Response): Promise<void> {
@@ -454,21 +496,41 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     try {
       const chatId = req.body?.chat_id as string | undefined;
       const body = req.body?.body as string | undefined;
-      if (!chatId || !body) {
-        res.status(400).json({ error: 'chat_id and body required' });
+      // Optional poll payload: { question, options[], note?, allowMultiple? }.
+      // When present, a native WhatsApp poll is sent (optionally preceded by a
+      // short text note). Used to preview the guide checklist poll.
+      const poll = req.body?.poll as
+        | { question?: string; options?: string[]; note?: string; allowMultiple?: boolean }
+        | undefined;
+      if (!chatId || (!body && !poll)) {
+        res.status(400).json({ error: 'chat_id and (body or poll) required' });
         return;
       }
-      let result;
-      if (chatId.endsWith('@g.us')) {
-        result = await app.whatsapp.sendToGroup(chatId, body);
-      } else {
-        // Accept @c.us jids or raw +E.164.
-        const phone = chatId.endsWith('@c.us')
-          ? `+${chatId.replace(/@c\.us$/, '')}`
-          : chatId;
-        result = await app.whatsapp.sendDirect(phone, body);
+      const isGroup = chatId.endsWith('@g.us');
+      const phone = chatId.endsWith('@c.us') ? `+${chatId.replace(/@c\.us$/, '')}` : chatId;
+
+      const results: Record<string, unknown> = {};
+      if (body) {
+        results.text = isGroup
+          ? await app.whatsapp.sendToGroup(chatId, body)
+          : await app.whatsapp.sendDirect(phone, body);
       }
-      res.json({ ok: true, result });
+      if (poll) {
+        if (!poll.question || !Array.isArray(poll.options) || poll.options.length === 0) {
+          res.status(400).json({ error: 'poll requires question and non-empty options[]' });
+          return;
+        }
+        const allowMultiple = poll.allowMultiple ?? true;
+        if (poll.note) {
+          results.note = isGroup
+            ? await app.whatsapp.sendToGroup(chatId, poll.note)
+            : await app.whatsapp.sendDirect(phone, poll.note);
+        }
+        results.poll = isGroup
+          ? await app.whatsapp.sendPollToGroup(chatId, poll.question, poll.options, allowMultiple)
+          : await app.whatsapp.sendPollDirect(phone, poll.question, poll.options, allowMultiple);
+      }
+      res.json({ ok: true, result: results });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -520,6 +582,185 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       fs.writeFileSync(target, yamlBody, 'utf8');
       app.reloadConfig();
       res.json({ ok: true, patched: Object.keys(patch).length, total: Object.keys(existing).length });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Peek at guide photos collected today (real-time via onRawGroupMessage handler).
+  exp.get('/admin/api/guide-photos', (_req, res) => {
+    const count = app.guidePhotosCollector?.count() ?? 0;
+    res.json({ collected: count });
+  });
+
+  // Forward images from a source group to a target group using raw page-level
+  // forwarding (bypasses the broken getMessageById/fetchMessages).
+  exp.post('/admin/api/guide-photos/forward-raw', async (req, res) => {
+    try {
+      const sourceGroupId = (req.body?.source as string) || '34651886491-1578239130@g.us';
+      const targetGroupId = (req.body?.target as string) || '120363425214664727@g.us';
+      const types = ((req.body?.types as string) || 'image,video').split(',');
+      const todayOnly = req.body?.today_only !== false;
+
+      const result = await (app.whatsapp as any).pupPageEval(
+        async (srcId: string, tgtId: string, mediaTypes: string[], filterToday: boolean) => {
+          const w = globalThis as any;
+          const srcChat = await w.WWebJS.getChat(srcId, { getAsModel: false });
+          if (!srcChat) return { error: 'source chat not found' };
+
+          const nowSec = Math.floor(Date.now() / 1000);
+          const startOfDaySec = nowSec - (nowSec % 86400) - (2 * 3600); // approx CET midnight
+
+          const msgs = srcChat.msgs.getModelsArray()
+            .filter((m: any) => mediaTypes.includes(m.type) && !m.isNotification && !m.id.fromMe)
+            .filter((m: any) => !filterToday || m.t >= startOfDaySec);
+
+          if (msgs.length === 0) return { forwarded: 0, message: 'no matching messages' };
+
+          const tgtChat = await w.WWebJS.getChat(tgtId, { getAsModel: false });
+          if (!tgtChat) return { error: 'target chat not found' };
+
+          let forwarded = 0;
+          const errors: string[] = [];
+          for (const m of msgs) {
+            try {
+              // Use WhatsApp Web's internal forward API
+              const msgStore = w.require('WAWebCollections').Msg;
+              const fullMsg = msgStore.get(m.id._serialized);
+              if (fullMsg) {
+                await fullMsg.forward(tgtChat);
+                forwarded++;
+              } else {
+                // Fallback: try sendMessage with the media
+                const chatForSend = await w.WWebJS.getChat(tgtId, { getAsModel: false });
+                await w.WWebJS.forwardMessage(chatForSend, m);
+                forwarded++;
+              }
+            } catch (e: any) {
+              errors.push(e?.message || String(e));
+            }
+          }
+          return { forwarded, total: msgs.length, errors: errors.length > 0 ? errors : undefined };
+        },
+        sourceGroupId, targetGroupId, types, todayOnly
+      );
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Raw message scan: reads already-loaded messages from WhatsApp's in-memory
+  // Msg collection WITHOUT calling fetchMessages/loadEarlierMsgs (which throws
+  // "r" on this session). Only sees messages that WhatsApp Web has in memory.
+  exp.get('/admin/api/messages/raw', async (req, res) => {
+    try {
+      const chatId = (req.query.chat_id as string) || '34651886491-1578239130@g.us';
+      const types = ((req.query.type as string) || 'image,video').split(',');
+      const result = await (app.whatsapp as any).pupPageEval(async (cid: string, types: string[]) => {
+        const w = globalThis as any;
+        const chat = await w.WWebJS.getChat(cid, { getAsModel: false });
+        if (!chat) return { error: 'chat not found' };
+        const msgs = chat.msgs.getModelsArray();
+        const filtered = msgs
+          .filter((m: any) => types.includes(m.type) && !m.isNotification)
+          .map((m: any) => {
+            const serialized = m.id ? (m.id._serialized || `${m.id.fromMe}_${m.id.remote}_${m.id.id}`) : 'unknown';
+            return {
+              id: serialized,
+              type: m.type,
+              timestamp: m.t,
+              fromMe: m.id?.fromMe ?? false,
+              hasMedia: Boolean(m.mediaData || m.directPath),
+            };
+          });
+        return { chatId: cid, inMemory: msgs.length, matching: filtered.length, messages: filtered };
+      }, chatId, types);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Send collected guide photos to a target group (test trigger).
+  exp.post('/admin/api/guide-photos/forward', async (req, res) => {
+    const targetGroupId = (req.body?.target as string) || '120363425214664727@g.us';
+    if (!app.guidePhotosCollector) {
+      res.json({ ok: false, error: 'collector not initialized' });
+      return;
+    }
+    const count = app.guidePhotosCollector.count();
+    if (count === 0) {
+      res.json({ ok: true, forwarded: 0, message: 'no photos collected today' });
+      return;
+    }
+    const forwarded = await app.guidePhotosCollector.forwardAllTo(
+      targetGroupId,
+      (chatId, media, caption) => app.whatsapp.sendMediaToGroup(chatId, media, caption).then(() => {}),
+    );
+    res.json({ ok: true, forwarded, total: count });
+  });
+
+  // List today's images/videos from a source group and optionally forward them
+  // to a target group. Used by the nightly job to reshare guide photos.
+  exp.get('/admin/api/images/today', async (req, res) => {
+    try {
+      const sourceGroupId = (req.query.source as string) || '34651886491-1578239130@g.us';
+      const messages = await app.whatsapp.getMessages(sourceGroupId, 1000);
+      const nowLocal = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+      const images = messages
+        .filter((m) => (m.type === 'image' || m.type === 'video') && m.hasMedia)
+        .filter((m) => {
+          const msgDate = new Date(m.timestamp * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+          return msgDate === nowLocal;
+        })
+        .sort((a, b) => a.timestamp - b.timestamp);
+      res.json({
+        date: nowLocal,
+        sourceGroupId,
+        count: images.length,
+        images: images.map((m) => ({
+          id: m.id,
+          type: m.type,
+          timestamp: m.timestamp,
+          time: new Date(m.timestamp * 1000).toLocaleTimeString('en-GB', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit' }),
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  exp.post('/admin/api/images/forward-today', async (req, res) => {
+    try {
+      const sourceGroupId = (req.body?.source as string) || '34651886491-1578239130@g.us';
+      const targetGroupId = (req.body?.target as string) || '120363425214664727@g.us';
+      const messages = await app.whatsapp.getMessages(sourceGroupId, 1000);
+      const nowLocal = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+      const images = messages
+        .filter((m) => (m.type === 'image' || m.type === 'video') && m.hasMedia)
+        .filter((m) => {
+          const msgDate = new Date(m.timestamp * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+          return msgDate === nowLocal;
+        })
+        .sort((a, b) => a.timestamp - b.timestamp);
+      if (images.length === 0) {
+        res.json({ ok: true, forwarded: 0, message: 'no images found for today' });
+        return;
+      }
+      let forwarded = 0;
+      const errors: string[] = [];
+      for (const img of images) {
+        try {
+          await app.whatsapp.forwardMessage(img.id, targetGroupId);
+          forwarded++;
+          // Small delay between forwards to avoid rate limiting
+          if (forwarded < images.length) await new Promise((r) => setTimeout(r, 1000));
+        } catch (err) {
+          errors.push(`${img.id}: ${(err as Error).message}`);
+        }
+      }
+      res.json({ ok: true, forwarded, total: images.length, errors: errors.length > 0 ? errors : undefined });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -636,6 +877,29 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
       res.status(500).json({ error: (err as Error).message });
     }
   });
+
+  // Send a customer DM and only announce it in the worker group once WhatsApp
+  // confirms delivery (ack >= 2). If it doesn't confirm, post a FAILURE warning
+  // instead. Body: { phone, body, kind } where kind is a human label like
+  // "welcome" / "reminder". Used both by the app flows (indirectly) and to
+  // re-send the messages that silently failed before the @lid fix.
+  exp.post('/admin/api/send-confirmed', async (req, res) => {
+    const phone = req.body?.phone as string | undefined;
+    const body = req.body?.body as string | undefined;
+    const kind = (req.body?.kind as string) || 'message';
+    const name = (req.body?.name as string) || phone || 'unknown';
+    if (!phone || !body) {
+      res.status(400).json({ error: 'phone and body required' });
+      return;
+    }
+    try {
+      const result = await app.notifyDelivery.sendAndAnnounce({ phone, body, kind, name });
+      res.json({ ok: true, result });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
 
   exp.get('/admin/api/debug/link-preview', async (req, res) => {
     const url = (req.query.url as string) || 'https://www.barcelola-tours.com/barcelolatours';

@@ -14,7 +14,12 @@ import { RemindersStore, ReplyAuditStore } from './persistence/reminders.js';
 import { WorkerForwardsStore } from './persistence/workerForwards.js';
 import { GroupMembersStore, SpamActionsStore } from './persistence/groupMembers.js';
 import { GuideNotificationsStore } from './persistence/guideNotifications.js';
+import { PrivateTourEventsStore } from './persistence/privateTourEvents.js';
+import { PrivateTourNotificationsStore } from './persistence/privateTourNotifications.js';
 import { createGuideNotifyRunner } from './jobs/guideNotifyRunner.js';
+import { createPrivateTourNotifyRunner } from './jobs/privateTourNotifyRunner.js';
+import { runPrivateTourSyncJob } from './jobs/privateTourSyncJob.js';
+import { createCalendarAuthFromServiceAccount } from './google/calendarAuth.js';
 import { createDetector } from './moderation/detector.js';
 import { createModerator } from './moderation/moderator.js';
 import { createGeminiClassifier } from './reminders/classifier.js';
@@ -26,10 +31,12 @@ import { createLogger } from './log/logger.js';
 import { createWhatsAppClient } from './whatsapp/client.js';
 import { createWixClient } from './wix/client.js';
 import { DirectMessageSender } from './messaging/directMessage.js';
+import { createDeliveryNotifier } from './messaging/deliveryNotifier.js';
 import { createHttpServer } from './http/server.js';
 import { startScheduler } from './scheduler.js';
 import { createEmailer } from './notify/emailer.js';
 import { createSessionMonitor } from './notify/sessionMonitor.js';
+import { createGuidePhotosCollector } from './jobs/guidePhotosCollector.js';
 import type { App } from './app.js';
 import type { SessionMonitor } from './notify/sessionMonitor.js';
 
@@ -70,6 +77,8 @@ async function main(): Promise<void> {
   const groupMembers = new GroupMembersStore(db);
   const spamActions = new SpamActionsStore(db);
   const guideNotifications = new GuideNotificationsStore(db);
+  const privateTourEvents = new PrivateTourEventsStore(db);
+  const privateTourNotifications = new PrivateTourNotificationsStore(db);
 
   const cutoff = new Date(Date.now() - 3600_000).toISOString();
   const recovered = jobHistory.markStaleRunning(cutoff);
@@ -114,6 +123,14 @@ async function main(): Promise<void> {
       backoffMs: config.settings.retry.backoff_ms,
     }),
     isPaused: () => controlState.isPaused(),
+    isNewContactRestricted: () => controlState.isNewContactRestricted(),
+    hasConfirmedDelivery: (phone) => reminders.hasConfirmedDelivery(phone),
+  });
+
+  const notifyDelivery = createDeliveryNotifier({
+    wa: whatsapp,
+    logger,
+    workerGroupId: config.settings.reminders.worker_group_id,
   });
 
   const geminiApiKey = process.env.GEMINI_API_KEY ?? '';
@@ -124,7 +141,7 @@ async function main(): Promise<void> {
     wix,
     reminders,
     logger,
-    config: { templates: config.templates, tours: config.tours },
+    config: () => ({ templates: config.templates, tours: config.tours }),
     settings: {
       pollIntervalSeconds: config.settings.reminders.poll_interval_seconds,
       officialContactNumber: config.settings.reminders.official_contact_number,
@@ -133,6 +150,7 @@ async function main(): Promise<void> {
     },
     isPaused: () => controlState.isPaused(),
     isConnected: () => whatsapp.state().kind === 'connected',
+    notifyDelivery,
   });
 
   // Guide pre-tour roster notifications: poll for tours entering the send
@@ -145,7 +163,7 @@ async function main(): Promise<void> {
           wix,
           store: guideNotifications,
           logger,
-          config: { guides: config.guides, tours: config.tours },
+          config: () => ({ guides: config.guides, tours: config.tours }),
           settings: {
             minutesBefore: gn.minutes_before,
             pollIntervalSeconds: gn.poll_interval_seconds,
@@ -158,6 +176,76 @@ async function main(): Promise<void> {
                   guideNames: gn.day_before.guide_names,
                 }
               : undefined,
+            checklistPoll: gn.checklist_poll
+              ? {
+                  enabled: gn.checklist_poll.enabled,
+                  question: gn.checklist_poll.question,
+                  note: gn.checklist_poll.note,
+                  items: gn.checklist_poll.items,
+                  guideNames: gn.checklist_poll.guide_names,
+                }
+              : undefined,
+          },
+          timezone: config.settings.timezone,
+          isPaused: () => controlState.isPaused(),
+          isConnected: () => whatsapp.state().kind === 'connected',
+        })
+      : null;
+
+  // Private (custom, non-catalog) tour bookings sourced from a Google
+  // Calendar via a service account. Two independent pieces, both gated on
+  // private_tours.enabled: a daily sync job (fetch+LLM-parse) and a
+  // day-before notify poller. Both are null when disabled/unconfigured so
+  // nothing runs without an explicit opt-in + valid service account key.
+  const pt = config.settings.private_tours;
+  const googleSaKeyB64 = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_B64;
+  const googleSaKeyRaw = googleSaKeyB64 ? Buffer.from(googleSaKeyB64, 'base64').toString('utf8') : undefined;
+
+  let runPrivateTourSync: (() => Promise<import('./types.js').JobOutcome>) | null = null;
+  if (pt?.enabled && pt.sync?.enabled) {
+    if (!googleSaKeyRaw) {
+      logger.warn({
+        source: 'startup',
+        eventType: 'private_tours_missing_service_account',
+        message: 'private_tours.sync enabled but GOOGLE_SERVICE_ACCOUNT_KEY_B64 not set; sync will not run',
+      });
+    } else if (!geminiApiKey) {
+      logger.warn({
+        source: 'startup',
+        eventType: 'private_tours_missing_gemini_key',
+        message: 'private_tours.sync enabled but GEMINI_API_KEY not set; sync will not run',
+      });
+    } else {
+      const calendarAuth = createCalendarAuthFromServiceAccount(googleSaKeyRaw);
+      runPrivateTourSync = () =>
+        runPrivateTourSyncJob({
+          calendarId: pt.calendar_id,
+          auth: calendarAuth,
+          store: privateTourEvents,
+          logger,
+          history: jobHistory,
+          geminiApiKey,
+          windowDaysBack: pt.sync!.window_days_back,
+          windowDaysForward: pt.sync!.window_days_forward,
+          dryRun: false,
+        });
+    }
+  }
+
+  const privateTourNotifyRunner =
+    pt?.enabled && pt.notify?.enabled
+      ? createPrivateTourNotifyRunner({
+          wa: whatsapp,
+          store: privateTourEvents,
+          notifyStore: privateTourNotifications,
+          logger,
+          config: () => ({ guides: config.guides, templates: config.templates, tours: config.tours }),
+          settings: {
+            sendTime: pt.notify.send_time,
+            pollIntervalSeconds: pt.notify.poll_interval_seconds,
+            testMode: pt.notify.test_mode ?? false,
+            testGroupId: pt.notify.test_group_id,
+            managerGuideName: pt.notify.manager_guide_name,
           },
           timezone: config.settings.timezone,
           isPaused: () => controlState.isPaused(),
@@ -199,6 +287,12 @@ async function main(): Promise<void> {
     });
   }
 
+  // Collect guide photos from the guides group throughout the day for
+  // resharing in the nightly broadcast to client groups.
+  const guidesGroupId = '34651886491-1578239130@g.us';
+  const guidePhotosCollector = createGuidePhotosCollector(guidesGroupId, config.settings.timezone);
+  whatsapp.onRawGroupMessage(guidePhotosCollector.onRawMessage);
+
   const app: App = {
     db,
     config,
@@ -223,13 +317,19 @@ async function main(): Promise<void> {
     groupMembers,
     spamActions,
     guideNotifications,
+    privateTourEvents,
+    privateTourNotifications,
     whatsapp,
     wix,
     dmSender,
+    notifyDelivery,
     logger,
     reminderRunner,
     guideNotifyRunner,
+    privateTourNotifyRunner,
+    runPrivateTourSync,
     sessionMonitor,
+    guidePhotosCollector,
     replyHandler: null,
     classifier: null,
     lastQrDataUrl: null,
@@ -259,7 +359,7 @@ async function main(): Promise<void> {
         defaultGoogleMapsUrl: config.settings.reminders.default_google_maps_url,
         debounceSeconds: config.settings.reminders.reply_debounce_seconds,
       },
-      config: { templates: config.templates, tours: config.tours },
+      config: () => ({ templates: config.templates, tours: config.tours }),
     });
     whatsapp.onIncomingDm(replyHandler);
     app.replyHandler = replyHandler;
@@ -317,6 +417,15 @@ async function main(): Promise<void> {
       source: 'startup',
       eventType: 'guide_notify_enabled',
       message: `guide pre-tour notifications enabled (${config.settings.guide_notify?.minutes_before}min before, ${config.guides.guides.length} guide(s) mapped)`,
+    });
+  }
+
+  if (privateTourNotifyRunner) {
+    privateTourNotifyRunner.start();
+    logger.info({
+      source: 'startup',
+      eventType: 'private_tour_notify_enabled',
+      message: `private-tour day-before notifications enabled (send at ${config.settings.private_tours?.notify?.send_time})`,
     });
   }
 

@@ -24,6 +24,10 @@ export interface IncomingDm {
   fromPhoneE164: string;
   body: string;
   timestamp: number;
+  /** WhatsApp message type: 'chat' for text, 'ptt'/'audio' for voice, 'image', 'video', etc. */
+  type?: string;
+  /** True when the message carries media (voice note, image, video, sticker, document). */
+  hasMedia?: boolean;
 }
 
 export type IncomingDmHandler = (dm: IncomingDm) => void | Promise<void>;
@@ -72,6 +76,21 @@ export interface WhatsAppClient {
 
   sendToGroup(groupId: string, body: string, opts?: { linkPreview?: import('../whatsapp/client.js').LinkPreviewData }): Promise<SendResult>;
   sendDirect(phoneE164: string, body: string): Promise<SendResult>;
+  /** Send a native WhatsApp poll (checklist) as a 1:1 DM. Queued like sendDirect. */
+  sendPollDirect(phoneE164: string, question: string, options: string[], allowMultipleAnswers?: boolean): Promise<SendResult>;
+  /** Send a native WhatsApp poll (checklist) to a group chat. */
+  sendPollToGroup(groupId: string, question: string, options: string[], allowMultipleAnswers?: boolean): Promise<SendResult>;
+  /** Resolve a phone to its canonical WhatsApp chat id (@c.us or @lid), or null if not on WhatsApp. */
+  resolveNumberId(phoneE164: string): Promise<string | null>;
+  /** Poll a sent message's ack until delivered (>=2) or timeout; returns final ack (-1..4). */
+  confirmDelivery(messageId: string, timeoutMs?: number): Promise<number>;
+  /** Send a DM with human-like presence: online → open chat → seen → typing → send. */
+  sendDirectHumanized(phoneE164: string, body: string, typingMs?: number): Promise<SendResult>;
+  /** Read-only: delivery acks of the most recent outbound messages to a phone. */
+  lastOutboundAcks(
+    phoneE164: string,
+    limit?: number,
+  ): Promise<Array<{ id: string; ack: number; ackName: string; timestamp: number; bodyPreview: string }>>;
 
   isGroupAdmin(groupId: string): Promise<boolean>;
   setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void>;
@@ -93,9 +112,12 @@ export interface WhatsAppClient {
   onIncomingDm(handler: IncomingDmHandler): void;
   onReaction(handler: ReactionHandler): void;
   onGroupMessage(handler: GroupMessageHandler): void;
+  onRawGroupMessage(handler: (msg: any, groupId: string) => void): void;
   onGroupJoin(handler: GroupJoinHandler): void;
 
   sendStickerFromDataUrl(toChatId: string, dataUrl: string): Promise<SendResult>;
   downloadStickerBytes(messageId: string): Promise<{ data: string; mimetype: string } | null>;
   debugLinkPreview(url: string): Promise<unknown>;
+  sendMediaToGroup(chatId: string, media: { mimetype: string; data: string }, caption?: string): Promise<SendResult>;
+  pupPageEval(fn: (...args: any[]) => any, ...args: any[]): Promise<any>;
 }

@@ -12,7 +12,17 @@ import type {
   WhatsAppClient,
 } from './types.js';
 
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, Poll } = pkg;
+
+/** Thrown by sendDirect when a phone is definitively not a WhatsApp user
+ *  (WhatsApp's existence query succeeded and returned "no such account").
+ *  Callers treat this as a permanent, non-retryable failure. */
+export class UnregisteredNumberError extends Error {
+  constructor(public readonly phone: string) {
+    super(`number not registered on WhatsApp: ${phone}`);
+    this.name = 'UnregisteredNumberError';
+  }
+}
 
 export interface LinkPreviewData {
   title: string;
@@ -101,6 +111,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   const reactionHandlers: ReactionHandler[] = [];
   const groupMessageHandlers: GroupMessageHandler[] = [];
   const groupJoinHandlers: GroupJoinHandler[] = [];
+  const rawGroupMessageHandlers: Array<(msg: any, groupId: string) => void> = [];
   let current: WhatsAppState = { kind: 'disconnected' };
   const setState = (s: WhatsAppState) => {
     current = s;
@@ -223,6 +234,13 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
           if (first) seenMessageIds.delete(first);
         }
       }
+      // Raw message hook for the guide photos collector (needs the original msg
+      // object to call .forward() later — the GroupMessage interface strips it).
+      for (const h of rawGroupMessageHandlers) {
+        try { h(msg, from); } catch (err) {
+          console.error('[wa:rawGroupMessageHandler] error', err);
+        }
+      }
       if (groupMessageHandlers.length === 0) return;
       // `author` is the participant who sent it; `from` is the group jid.
       const authorId: string =
@@ -248,7 +266,19 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     // Accept both classic @c.us (phone-addressed) and @lid (LID-addressed) DMs.
     // Anything else we skip.
     if (!(from.endsWith('@c.us') || from.endsWith('@lid'))) return;
-    if (typeof msg.body !== 'string' || msg.body.length === 0) return;
+    // Note: we intentionally do NOT drop empty-body DMs anymore. Voice notes
+    // (type=ptt), images, videos, stickers etc. carry no text `body` but are
+    // real customer messages — dropping them meant the bot silently ignored a
+    // customer (bad experience). We pass them through with type/hasMedia so the
+    // reply handler can forward them to staff and, if unbooked, auto-reply.
+    // We still skip WhatsApp system notifications (e2e_notification, etc.).
+    const msgType: string = typeof msg.type === 'string' ? msg.type : 'unknown';
+    const SYSTEM_TYPES = new Set(['e2e_notification', 'notification_template', 'gp2', 'broadcast_notification', 'call_log', 'protocol']);
+    if (SYSTEM_TYPES.has(msgType)) return;
+    const hasBody = typeof msg.body === 'string' && msg.body.length > 0;
+    const hasMedia = Boolean(msg.hasMedia);
+    // Nothing actionable (no text and no media) — skip.
+    if (!hasBody && !hasMedia && msgType === 'unknown') return;
     if (serialized && seenMessageIds.has(serialized)) return;
     if (serialized) {
       seenMessageIds.add(serialized);
@@ -325,8 +355,10 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     const dm = {
       messageId: serialized,
       fromPhoneE164,
-      body: msg.body,
+      body: typeof msg.body === 'string' ? msg.body : '',
       timestamp: typeof msg.timestamp === 'number' ? msg.timestamp : Math.floor(Date.now() / 1000),
+      type: msgType,
+      hasMedia,
     };
     for (const h of dmHandlers) {
       Promise.resolve(h(dm)).catch((err) => {
@@ -468,14 +500,232 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     return { messageId: msg.id._serialized };
   }
 
-  async function sendDirect(phoneE164: string, body: string): Promise<SendResult> {
+  /**
+   * Resolve a phone number to its CANONICAL WhatsApp chat id. WhatsApp has been
+   * migrating accounts to LID (@lid) addressing; a hand-built `${digits}@c.us`
+   * id can silently fail to route after such a migration even though the number
+   * is a real WhatsApp user. `getNumberId` asks WhatsApp for the real id (which
+   * may be @c.us or @lid) and returns null if the number isn't on WhatsApp.
+   */
+  async function resolveNumberId(phoneE164: string): Promise<string | null> {
     const digits = phoneE164.replace(/^\+/, '');
-    const chatId = `${digits}@c.us`;
-    // Disable WhatsApp's auto link-preview card for customer DMs. The welcome,
-    // confirmation and reminder messages contain the website + group-invite
-    // links, and we don't want a big preview card attached to them.
-    const msg = await client.sendMessage(chatId, body, { linkPreview: false });
-    return { messageId: msg.id._serialized };
+    try {
+      const wid = await client.getNumberId(`${digits}@c.us`);
+      return wid?._serialized ?? null;
+    } catch (err) {
+      console.error(`[wa:resolveNumberId] failed for ${phoneE164}:`, err);
+      return null;
+    }
+  }
+
+  // Every 1:1 DM in the app — whether triggered by a webhook, the reminder
+  // poller, the guide-notify poller, or an admin route — funnels through this
+  // single queue so at most one send is ever in flight at a time, regardless
+  // of which caller triggered it. WhatsApp flagged this account for suspected
+  // bulk/automated messaging (linked-device "new chat" restriction, seen
+  // 2026-07-07); sending several DMs in parallel is exactly the pattern that
+  // triggers that kind of anti-spam detection. `sendDirectQueue` chains onto
+  // itself so a slow/failed send never blocks forever — the chain always
+  // advances even if the previous send throws.
+  let sendDirectQueue: Promise<unknown> = Promise.resolve();
+  function enqueueSendDirect<T>(task: () => Promise<T>): Promise<T> {
+    const result = sendDirectQueue.then(task, task);
+    sendDirectQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  async function sendDirect(phoneE164: string, body: string): Promise<SendResult> {
+    // Customer DMs go through the humanized path (come online → mark seen →
+    // show "typing…" for a randomized 5-30s → send). For numbers the bot has
+    // never chatted with, WhatsApp is far more likely to actually establish
+    // the session and deliver a message that follows this natural presence
+    // pattern than one fired instantly by an idle linked device (the
+    // __x_isSendFailure / ack=-1 case we saw). Resolution to the canonical
+    // @c.us/@lid id happens inside. Queued so it never overlaps another
+    // in-flight direct send (see enqueueSendDirect above).
+    return enqueueSendDirect(() => sendDirectHumanized(phoneE164, body));
+  }
+
+  /**
+   * Send a DM the way a human would: come online, open the chat, mark seen,
+   * show a "typing…" indicator for a couple of seconds, then send. For numbers
+   * the bot has never chatted with, WhatsApp is more likely to actually deliver
+   * a message that follows this natural presence pattern than one fired
+   * instantly by an otherwise-idle linked device. Resolves the canonical id via
+   * getNumberId first (same server handshake the phone does when you open a chat).
+   */
+  /**
+   * WhatsApp only assigns a contact's LID (opaque Linked-Device Id) once it has
+   * been "synced" — normally this happens automatically the first time a human
+   * opens a chat with them. A linked device (this bot) messaging someone cold
+   * skips that sync, so internal calls like `findOrCreateLatestChat` throw
+   * "No LID for user" and/or the send silently never reaches the device (the
+   * ack=-1 failures we've observed). This forces the same USync sync WhatsApp
+   * Web does when you open a chat, via WAWebContactSyncUtils, so the LID gets
+   * resolved before we attempt to send. Community-verified workaround for
+   * https://github.com/wwebjs/whatsapp-web.js/issues/3834 (unresolved upstream
+   * as of whatsapp-web.js 1.34.7 — see also the July 2026 duplicate report at
+   * https://github.com/wwebjs/whatsapp-web.js/issues/201822). Best-effort: if
+   * the internal module shape changes in a future WA Web release this silently
+   * no-ops rather than breaking sends.
+   */
+  async function forceSyncLid(phoneE164: string): Promise<void> {
+    const digits = phoneE164.replace(/^\+/, '');
+    try {
+      const result = await client.pupPage!.evaluate(async (phoneNumber: string) => {
+        const w = globalThis as any;
+        try {
+          const syncUtils = w.require('WAWebContactSyncUtils');
+          if (!syncUtils?.constructUsyncDeltaQuery) return { ok: false, reason: 'no constructUsyncDeltaQuery' };
+          const query = syncUtils.constructUsyncDeltaQuery([{ type: 'add', phoneNumber }]);
+          const res = await query.execute();
+          const lid = res?.list?.[0]?.lid ?? null;
+          return { ok: true, lid };
+        } catch (e: any) {
+          return { ok: false, reason: e?.message || String(e) };
+        }
+      }, digits);
+      console.log(`[wa:forceSyncLid] ${phoneE164} -> ${JSON.stringify(result)}`);
+    } catch (err) {
+      console.error(`[wa:forceSyncLid] evaluate failed for ${phoneE164}:`, err);
+    }
+  }
+
+  /**
+   * Typing duration scaled to message length so it reads as a human actually
+   * composing that text — a one-line "thank you" shouldn't take as long to
+   * "type" as a multi-paragraph booking confirmation. Linearly interpolates
+   * between MIN_MS (short messages) and MAX_MS (long messages) based on
+   * character count, then applies ±15% jitter so identical-length messages
+   * don't all take the exact same time.
+   */
+  function typingMsForBody(body: string): number {
+    const MIN_MS = 4_000;
+    const MAX_MS = 30_000;
+    const MIN_LEN = 10; // very short replies ("תודה!") floor near MIN_MS
+    const MAX_LEN = 500; // long confirmations/reminders cap near MAX_MS
+    const len = Math.min(Math.max(body.length, MIN_LEN), MAX_LEN);
+    const t = (len - MIN_LEN) / (MAX_LEN - MIN_LEN);
+    const base = MIN_MS + t * (MAX_MS - MIN_MS);
+    const jitter = 0.85 + Math.random() * 0.3; // 0.85x - 1.15x
+    return Math.round(base * jitter);
+  }
+
+  async function sendDirectHumanized(
+    phoneE164: string,
+    body: string,
+    typingMs = typingMsForBody(body),
+  ): Promise<SendResult> {
+    const digits = phoneE164.replace(/^\+/, '');
+    const chatId = (await resolveNumberId(phoneE164)) ?? `${digits}@c.us`;
+    // Proactively force the LID sync before the first send attempt (not just on
+    // "No LID for user" catch) — some cold-contact sends fail *silently*
+    // (ack stays -1, no exception) rather than throwing, because the LID was
+    // never resolved server-side. See forceSyncLid() for background.
+    await forceSyncLid(phoneE164);
+    try {
+      await client.sendPresenceAvailable();
+    } catch (err) {
+      console.error('[wa:humanized] sendPresenceAvailable failed:', err);
+    }
+
+    const attemptChatSend = async (): Promise<SendResult> => {
+      const chat = await client.getChatById(chatId);
+      try { await chat.sendSeen(); } catch { /* best-effort */ }
+      // The "typing…" indicator expires after a few seconds on the recipient's
+      // side, so to hold it for the full typingMs we re-assert the typing state
+      // every ~2.5s (keep-alive) instead of firing it once.
+      const deadline = Date.now() + typingMs;
+      while (Date.now() < deadline) {
+        try { await (chat as any).sendStateTyping(); } catch { /* best-effort */ }
+        const remaining = deadline - Date.now();
+        await new Promise((r) => setTimeout(r, Math.min(2500, Math.max(0, remaining))));
+      }
+      try { await (chat as any).clearState(); } catch { /* best-effort */ }
+      const msg = await chat.sendMessage(body, { linkPreview: false } as any);
+      return { messageId: (msg as any).id._serialized };
+    };
+
+    try {
+      return await attemptChatSend();
+    } catch (err) {
+      const isLidError = /No LID for user/i.test((err as Error)?.message ?? '');
+      console.error('[wa:humanized] chat path failed, falling back to sendMessage:', err);
+      if (isLidError) {
+        console.log(`[wa:humanized] "No LID" detected, forcing LID sync for ${phoneE164}`);
+        await forceSyncLid(phoneE164);
+        try {
+          return await attemptChatSend();
+        } catch (err2) {
+          console.error('[wa:humanized] retry after LID sync also failed:', err2);
+        }
+      }
+      const msg = await client.sendMessage(chatId, body, { linkPreview: false });
+      return { messageId: msg.id._serialized };
+    }
+  }
+
+  /**
+   * Poll a sent message's delivery ack until it reaches ACK_DEVICE (2 = delivered
+   * to the recipient's device) or better, or the timeout elapses. Returns the
+   * final ack seen (-1 error … 0 pending, 1 sent-to-server, 2 delivered, 3 read).
+   * We use this to only announce a customer send in the worker group once WhatsApp
+   * confirms it actually reached the device — a plain sendMessage() success only
+   * means "handed to the library", which we learned can silently not deliver.
+   */
+  async function confirmDelivery(messageId: string, timeoutMs = 20_000): Promise<number> {
+    const deadline = Date.now() + timeoutMs;
+    let lastAck = 0;
+    while (Date.now() < deadline) {
+      try {
+        const msg: any = await client.getMessageById(messageId);
+        const ack = typeof msg?.ack === 'number' ? msg.ack : 0;
+        lastAck = ack;
+        if (ack >= 2 || ack === -1) return ack; // delivered/read, or hard error
+      } catch {
+        // message not resolvable yet — keep polling
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    return lastAck;
+  }
+
+  /**
+   * Send a native WhatsApp poll as a 1:1 message. WhatsApp polls double as a
+   * lightweight checklist: with allowMultipleAnswers the recipient can tick
+   * every item. Routed through the same one-at-a-time send queue as sendDirect
+   * (the account's anti-spam "new chat" restriction — see enqueueSendDirect).
+   * Resolves the canonical @c.us/@lid id first, same as a humanized DM.
+   */
+  async function sendPollDirect(
+    phoneE164: string,
+    question: string,
+    options: string[],
+    allowMultipleAnswers = true,
+  ): Promise<SendResult> {
+    return enqueueSendDirect(async () => {
+      const digits = phoneE164.replace(/^\+/, '');
+      const chatId = (await resolveNumberId(phoneE164)) ?? `${digits}@c.us`;
+      await forceSyncLid(phoneE164);
+      const poll = new Poll(question, options, { allowMultipleAnswers, messageSecret: undefined });
+      const msg = await client.sendMessage(chatId, poll);
+      return { messageId: (msg as any).id._serialized };
+    });
+  }
+
+  /** Send a native WhatsApp poll to a group chat. */
+  async function sendPollToGroup(
+    groupId: string,
+    question: string,
+    options: string[],
+    allowMultipleAnswers = true,
+  ): Promise<SendResult> {
+    const poll = new Poll(question, options, { allowMultipleAnswers, messageSecret: undefined });
+    const msg = await client.sendMessage(groupId, poll);
+    return { messageId: (msg as any).id._serialized };
   }
 
   async function isGroupAdmin(groupId: string): Promise<boolean> {
@@ -571,7 +821,37 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       type: msg.type,
       timestamp: msg.timestamp,
       hasMedia: msg.hasMedia,
+      fromMe: Boolean(msg.fromMe),
+      ack: typeof msg.ack === 'number' ? msg.ack : null,
     }));
+  }
+
+  /**
+   * Inspect the delivery ack of the most recent outbound (fromMe) messages to a
+   * phone. Read-only diagnostic to answer "did our last DM to X actually arrive?"
+   * ack: -1 error, 0 pending, 1 sent-to-server, 2 delivered, 3 read, 4 played.
+   */
+  async function lastOutboundAcks(phoneE164: string, limit = 5): Promise<
+    Array<{ id: string; ack: number; ackName: string; timestamp: number; bodyPreview: string }>
+  > {
+    const chatId = (await resolveNumberId(phoneE164)) ?? `${phoneE164.replace(/^\+/, '')}@c.us`;
+    const chat = await client.getChatById(chatId);
+    const messages = await chat.fetchMessages({ limit: 30 });
+    const ackName = (a: number) =>
+      ({ '-1': 'ERROR', '0': 'PENDING', '1': 'SENT', '2': 'DELIVERED', '3': 'READ', '4': 'PLAYED' } as Record<string, string>)[
+        String(a)
+      ] ?? String(a);
+    return messages
+      .filter((m: any) => m.fromMe)
+      .sort((a: any, b: any) => b.timestamp - a.timestamp)
+      .slice(0, limit)
+      .map((m: any) => ({
+        id: m.id._serialized,
+        ack: typeof m.ack === 'number' ? m.ack : 0,
+        ackName: ackName(typeof m.ack === 'number' ? m.ack : 0),
+        timestamp: m.timestamp,
+        bodyPreview: (m.body || '').slice(0, 40),
+      }));
   }
 
   async function forwardMessage(messageId: string, toChatId: string) {
@@ -696,6 +976,15 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     onStateChange: (cb: Listener) => listeners.push(cb),
     sendToGroup,
     sendDirect,
+    sendPollDirect,
+    sendPollToGroup,
+    resolveNumberId,
+    confirmDelivery,
+    lastOutboundAcks,
+    // Exposed publicly too — route through the same queue as sendDirect so a
+    // direct caller can't bypass the one-at-a-time guarantee.
+    sendDirectHumanized: (phoneE164: string, body: string, typingMs?: number) =>
+      enqueueSendDirect(() => sendDirectHumanized(phoneE164, body, typingMs)),
     isGroupAdmin,
     setGroupMessagesAdminsOnly,
     getGroupAdmins,
@@ -709,9 +998,17 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     onIncomingDm: (h: IncomingDmHandler) => dmHandlers.push(h),
     onReaction: (h: ReactionHandler) => reactionHandlers.push(h),
     onGroupMessage: (h: GroupMessageHandler) => groupMessageHandlers.push(h),
+    onRawGroupMessage: (h: (msg: any, groupId: string) => void) => rawGroupMessageHandlers.push(h),
     onGroupJoin: (h: GroupJoinHandler) => groupJoinHandlers.push(h),
     sendStickerFromDataUrl,
     downloadStickerBytes,
     debugLinkPreview,
+    async sendMediaToGroup(chatId: string, media: { mimetype: string; data: string }, caption?: string): Promise<SendResult> {
+      const MessageMedia = (pkg as any).MessageMedia;
+      const mm = new MessageMedia(media.mimetype, media.data, 'photo.jpg');
+      const msg: any = await client.sendMessage(chatId, mm, { caption: caption || undefined });
+      return { messageId: msg?.id?._serialized ?? '' };
+    },
+    pupPageEval: (fn: (...args: any[]) => any, ...args: any[]) => client.pupPage!.evaluate(fn, ...args),
   };
 }

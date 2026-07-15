@@ -22,6 +22,8 @@ export interface NightlyJobInput {
   reminders: RemindersStore;
   /** Path to DATA_DIR (for loading sticker assets). */
   dataDir?: string;
+  /** Forwards today's collected guide photos to a target group. */
+  forwardGuidePhotos?: (targetChatId: string) => Promise<number>;
   isPaused: () => boolean;
   dryRun: boolean;
   now?: () => Date;
@@ -113,6 +115,31 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
 
       let groupsSent = 0;
       if (eligible.length > 0 && verified.admin.length > 0) {
+        // Send guide photos collected throughout the day BEFORE the broadcast.
+        if (input.forwardGuidePhotos) {
+          for (const gid of verified.admin) {
+            try {
+              const count = await input.forwardGuidePhotos(gid);
+              if (count > 0) {
+                input.logger.info({
+                  source: 'jobs',
+                  eventType: 'nightly_photos_sent',
+                  message: `sent ${count} guide photos to ${gid}`,
+                });
+              }
+            } catch (err) {
+              input.logger.warn({
+                source: 'jobs',
+                eventType: 'nightly_photo_send_failed',
+                message: (err as Error).message,
+                metadata: { groupId: gid },
+              });
+            }
+          }
+          // 3 sec buffer between photos and broadcast
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+
         // Pre-fetch the OG link preview for the barcelola-tours.com URL so we
         // can inject it into the message (the headless Chromium's built-in
         // preview fetcher is broken on Railway — returns null thumbnail).
@@ -138,6 +165,9 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
           }
         }
 
+        // 3 sec buffer between message and sticker
+        await new Promise((r) => setTimeout(r, 3000));
+
         // Send the goodnight sticker to each group after the broadcast message.
         const stickerPath = input.dataDir
           ? path.join(input.dataDir, 'assets', 'welcome-sticker.webp')
@@ -159,6 +189,9 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
           }
         }
       }
+
+      // 3 sec buffer between sticker and closing the group
+      await new Promise((r) => setTimeout(r, 3000));
 
       let groupsClosed = 0;
       for (const id of verified.admin) {

@@ -5,6 +5,9 @@ yarn.lock
 # Local-only npm registry override (AWS CodeArtifact workaround)
 app/.npmrc
 
+# Google OAuth credentials and tokens
+app/credentials/
+
 # Environment variables
 .env
 .env.local

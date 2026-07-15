@@ -113,11 +113,17 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
         });
       }
 
+      // Sending the broadcast/photos/sticker never required admin rights —
+      // only closing the group (setMessagesAdminsOnly) does. Gating the send
+      // on verified.admin meant a broken/flaky admin-check (e.g. WhatsApp Web
+      // internal changes breaking getChatById — see isGroupAdmin) silently
+      // skipped the ENTIRE nightly broadcast, not just the close step. Send
+      // to every resolved target regardless; only closing uses verified.admin.
       let groupsSent = 0;
-      if (eligible.length > 0 && verified.admin.length > 0) {
+      if (eligible.length > 0 && targets.length > 0) {
         // Send guide photos collected throughout the day BEFORE the broadcast.
         if (input.forwardGuidePhotos) {
-          for (const gid of verified.admin) {
+          for (const gid of targets) {
             try {
               const count = await input.forwardGuidePhotos(gid);
               if (count > 0) {
@@ -147,8 +153,8 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
         const linkPreview = await fetchLinkPreview(previewUrl).catch(() => null);
 
         const delay = input.config.settings.broadcast.inter_message_delay_ms;
-        for (let i = 0; i < verified.admin.length; i++) {
-          const gid = verified.admin[i]!;
+        for (let i = 0; i < targets.length; i++) {
+          const gid = targets[i]!;
           try {
             await input.whatsapp.sendToGroup(gid, message, linkPreview ? { linkPreview } : undefined);
             groupsSent += 1;
@@ -160,7 +166,7 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
               metadata: { groupId: gid },
             });
           }
-          if (i < verified.admin.length - 1 && delay > 0) {
+          if (i < targets.length - 1 && delay > 0) {
             await new Promise((r) => setTimeout(r, delay));
           }
         }
@@ -175,7 +181,7 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
         if (stickerPath && fs.existsSync(stickerPath)) {
           const stickerData = fs.readFileSync(stickerPath).toString('base64');
           const dataUrl = `data:image/webp;base64,${stickerData}`;
-          for (const gid of verified.admin) {
+          for (const gid of targets) {
             try {
               await input.whatsapp.sendStickerFromDataUrl(gid, dataUrl);
             } catch (err) {
@@ -235,13 +241,16 @@ export async function runNightlyJob(input: NightlyJobInput): Promise<JobOutcome>
         });
       }
 
+      // "partial" now specifically means "some groups couldn't be closed" —
+      // the broadcast itself went to every resolved target regardless of
+      // admin status (see groupsSent above).
       const status = verified.notAdmin.length > 0 ? 'partial' : 'success';
       return {
         status,
         toursCount: eligible.length,
         groupsSent,
         groupsClosed,
-        metadata: { targets: verified.admin, skipped: verified.notAdmin },
+        metadata: { targets, notClosable: verified.notAdmin },
       };
     },
   });

@@ -20,7 +20,8 @@ export class GroupAdminService {
       try {
         if (await this.client.isGroupAdmin(id)) admin.push(id);
         else notAdmin.push(id);
-      } catch {
+      } catch (err) {
+        console.error(`[groupAdmin] isGroupAdmin(${id}) threw:`, (err as Error)?.message ?? err);
         notAdmin.push(id);
       }
     }

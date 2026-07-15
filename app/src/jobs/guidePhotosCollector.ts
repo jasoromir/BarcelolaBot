@@ -49,6 +49,9 @@ export function createGuidePhotosCollector(sourceGroupId: string, tz: string): G
 
     const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : Math.floor(Date.now() / 1000);
     const caption = typeof msg.body === 'string' ? msg.body : '';
+    console.log(
+      `[guide-photos] raw msg: id=${JSON.stringify(msg?.id)} hasMedia=${msg?.hasMedia} type=${type} mediaKey=${msg?.mediaKey ? 'present' : 'missing'}`,
+    );
 
     // Download media immediately while the message is live
     msg.downloadMedia().then((media: any) => {
@@ -61,10 +64,10 @@ export function createGuidePhotosCollector(sourceGroupId: string, tz: string): G
         });
         console.log(`[guide-photos] captured ${type} (${Math.round(media.data.length / 1024)}KB), total=${collected.length}`);
       } else {
-        console.warn(`[guide-photos] downloadMedia returned null for ${type} at ${timestamp}`);
+        console.warn(`[guide-photos] downloadMedia returned null/undefined for ${type} at ${timestamp}`);
       }
     }).catch((err: any) => {
-      console.error(`[guide-photos] downloadMedia failed:`, err?.message || err);
+      console.error(`[guide-photos] downloadMedia failed: ${err?.message ?? err} | stack=${err?.stack ?? 'n/a'}`);
     });
   }
 

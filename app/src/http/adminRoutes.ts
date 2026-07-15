@@ -624,18 +624,20 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
           const errors: string[] = [];
           for (const m of msgs) {
             try {
-              // Use WhatsApp Web's internal forward API
-              const msgStore = w.require('WAWebCollections').Msg;
-              const fullMsg = msgStore.get(m.id._serialized);
-              if (fullMsg) {
-                await fullMsg.forward(tgtChat);
-                forwarded++;
-              } else {
-                // Fallback: try sendMessage with the media
-                const chatForSend = await w.WWebJS.getChat(tgtId, { getAsModel: false });
-                await w.WWebJS.forwardMessage(chatForSend, m);
-                forwarded++;
-              }
+              // `m` here IS the live message model from getModelsArray() — no
+              // need to re-look it up by id (m.id._serialized is missing/
+              // malformed on this session, which is exactly why fetchMessages/
+              // Msg.get(m.id._serialized) throw "r" / IDBObjectStore key
+              // errors elsewhere). Forward it directly via WhatsApp Web's
+              // internal forward action.
+              await w.require('WAWebChatForwardMessage').forwardMessages({
+                chat: tgtChat,
+                msgs: [m],
+                multicast: true,
+                includeCaption: true,
+                appendedText: undefined,
+              });
+              forwarded++;
             } catch (e: any) {
               errors.push(e?.message || String(e));
             }
@@ -672,6 +674,7 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
               timestamp: m.t,
               fromMe: m.id?.fromMe ?? false,
               hasMedia: Boolean(m.mediaData || m.directPath),
+              filehash: m.filehash ?? m.mediaData?.filehash ?? null,
             };
           });
         return { chatId: cid, inMemory: msgs.length, matching: filtered.length, messages: filtered };

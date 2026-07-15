@@ -1,7 +1,7 @@
 import type { TemplatesConfig, ToursConfig } from '../config/schemas.js';
 import type { ReminderRow } from '../persistence/reminders.js';
 
-function interpolate(template: string, vars: Record<string, string>): string {
+export function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
 }
 

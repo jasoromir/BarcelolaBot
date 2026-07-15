@@ -70,7 +70,7 @@ export type WhatsAppState =
 
 export type AutomationsState = 'running' | 'paused';
 
-export type JobName = 'nightly' | 'morning';
+export type JobName = 'nightly' | 'morning' | 'private_tour_sync';
 
 export type JobStatus = 'running' | 'success' | 'partial' | 'failed' | 'skipped';
 

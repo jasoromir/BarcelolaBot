@@ -31,7 +31,9 @@ export interface ReplyHandlerDeps {
     /** Quiet window after each DM before we classify. 0 = fire immediately. */
     debounceSeconds?: number;
   };
-  config: {
+  /** Getter, not a static snapshot — so a config reload is picked up on the
+   *  next incoming DM instead of staying frozen at whatever was loaded at startup. */
+  config: () => {
     templates: TemplatesConfig;
     tours: ToursConfig;
   };
@@ -63,8 +65,13 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
     const merged: IncomingDm = {
       messageId: pending.dms[pending.dms.length - 1]!.messageId,
       fromPhoneE164: pending.dms[0]!.fromPhoneE164,
-      body: pending.dms.map((d) => d.body).join('\n'),
+      body: pending.dms.map((d) => d.body).filter(Boolean).join('\n'),
       timestamp: pending.dms[pending.dms.length - 1]!.timestamp,
+      // Preserve non-text signal: if any buffered message was a voice note /
+      // media / non-chat, the merged message is treated as non-text so it's
+      // forwarded to staff (the LLM can't read audio/images).
+      type: pending.dms.some((d) => d.type && d.type !== 'chat') ? 'media' : 'chat',
+      hasMedia: pending.dms.some((d) => d.hasMedia),
     };
     if (pending.dms.length > 1) {
       deps.logger.info({
@@ -115,6 +122,44 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
     });
     const reminder = deps.reminders.findActiveForReply(phone, nowIso);
 
+    // Non-text messages (voice notes, images, video, stickers, documents) can't
+    // be understood by the text LLM. Rather than drop them (which silently
+    // ignored real customers), always forward them to the worker group so staff
+    // can listen/look and respond. If the sender has no active booking we also
+    // send the unmanaged-number auto-reply (once per hour), same as for text.
+    const isNonText = (dm.hasMedia === true) || (dm.type !== undefined && dm.type !== 'chat') || dm.body.length === 0;
+    if (isNonText) {
+      await forwardMediaToWorker(deps, phone, reminder, dm);
+      let repliedUnmanaged = false;
+      if (!reminder) {
+        const lastReply = lastUnmanagedReplyAt.get(phone);
+        const throttled =
+          lastReply !== undefined && Date.now() - lastReply < UNMANAGED_REPLY_THROTTLE_MS;
+        if (!throttled) {
+          await safeSend(deps, phone, deps.config().templates.unmanaged_number_reply, 'unmanaged_number_reply');
+          lastUnmanagedReplyAt.set(phone, Date.now());
+          repliedUnmanaged = true;
+        }
+      }
+      deps.audit.record({
+        ts: nowIso,
+        phone,
+        bookingId: reminder?.bookingId ?? null,
+        rawText: dm.body || `[${dm.type ?? 'media'} message]`,
+        intent: null,
+        participantCount: null,
+        confidence: null,
+        forwarded: true,
+        notes: `non_text_${dm.type ?? 'media'}${repliedUnmanaged ? '_unmanaged_replied' : ''}`,
+      });
+      deps.logger.info({
+        source: 'reply',
+        eventType: 'non_text_forwarded',
+        message: `forwarded non-text (${dm.type ?? 'media'}) from ${phone} to worker group${reminder ? '' : ' (no booking; auto-replied)'}`,
+      });
+      return;
+    }
+
     if (!reminder) {
       // No active reminder: this number isn't managed by the bot (no upcoming
       // tour booked). Reply in Hebrew pointing them to the WhatsApp groups
@@ -130,7 +175,7 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
         await safeSend(
           deps,
           phone,
-          deps.config.templates.unmanaged_number_reply,
+          deps.config().templates.unmanaged_number_reply,
           'unmanaged_number_reply',
         );
         lastUnmanagedReplyAt.set(phone, Date.now());
@@ -312,8 +357,8 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
     // meeting point + map.
     const ack = buildConfirmationAck({
       reminder: { ...reminder, participantCount: newCount },
-      templates: deps.config.templates,
-      tours: deps.config.tours,
+      templates: deps.config().templates,
+      tours: deps.config().tours,
       officialContactNumber: deps.settings.officialContactNumber,
       defaultGoogleMapsUrl: deps.settings.defaultGoogleMapsUrl,
       isUpdate: wasAlreadyConfirmed,
@@ -382,7 +427,7 @@ async function handleCancel(
 
   const ack = buildCancelAck({
     reminder,
-    templates: deps.config.templates,
+    templates: deps.config().templates,
     officialContactNumber: deps.settings.officialContactNumber,
   });
   await safeSend(deps, reminder.phone, ack, 'cancel_ack');
@@ -396,7 +441,7 @@ async function handleCancel(
     : `נכשל — ${wixResult.error ?? 'unknown'}`;
   const notice = buildCancelNotice({
     reminder,
-    templates: deps.config.templates,
+    templates: deps.config().templates,
     customerMessage: dm.body,
     wixStatus,
   });
@@ -408,6 +453,59 @@ async function handleCancel(
     message: `cancelled ${reminder.bookingId} wix=${wixResult.ok}`,
     metadata: { wixError: wixResult.error },
   });
+}
+
+// Forward a non-text customer message (voice note / image / video / etc.) to the
+// worker group so staff can handle it — the text LLM can't read media. Posts a
+// Hebrew heads-up with the customer's details, then forwards the actual media
+// message so staff can listen/view it directly.
+async function forwardMediaToWorker(
+  deps: ReplyHandlerDeps,
+  phone: string,
+  reminder: ReminderRow | null,
+  dm: IncomingDm,
+): Promise<void> {
+  const typeLabelHe: Record<string, string> = {
+    ptt: 'הודעה קולית 🎤',
+    audio: 'הודעת אודיו 🎵',
+    image: 'תמונה 🖼️',
+    video: 'וידאו 🎥',
+    sticker: 'סטיקר',
+    document: 'קובץ 📎',
+    media: 'הודעת מדיה',
+  };
+  const kind = typeLabelHe[dm.type ?? 'media'] ?? `הודעה (${dm.type ?? 'media'})`;
+  const clientName = reminder?.clientName ?? 'לקוח/ה';
+  const bookingLine = reminder
+    ? `🎯 *סיור:* ${reminder.tourNameHe ?? '(לא ידוע)'}`
+    : '⚠️ *אין הזמנה פעילה למספר זה*';
+  const notice =
+    `📩 *התקבלה ${kind} מלקוח* — לא ניתן לקרוא אוטומטית, נא לטפל ידנית\n\n` +
+    `👤 *לקוח:* ${clientName}\n` +
+    `📞 ${phone}\n` +
+    `${bookingLine}` +
+    (dm.body ? `\n\n*טקסט מצורף:*\n_${dm.body}_` : '');
+  try {
+    await deps.wa.sendToGroup(deps.settings.workerGroupId, notice);
+    // Best-effort: forward the actual media message so staff can open it.
+    if (dm.messageId && dm.hasMedia) {
+      try {
+        await deps.wa.forwardMessage(dm.messageId, deps.settings.workerGroupId);
+      } catch (err) {
+        deps.logger.warn({
+          source: 'reply',
+          eventType: 'media_forward_failed',
+          message: `could not forward media ${dm.messageId}: ${(err as Error).message}`,
+        });
+      }
+    }
+  } catch (err) {
+    deps.logger.error({
+      source: 'reply',
+      eventType: 'worker_notify_failed',
+      message: `media forward notice: ${(err as Error).message}`,
+    });
+  }
 }
 
 async function forwardToWorker(
@@ -456,7 +554,7 @@ async function forwardToWorker(
 
   const forward = buildWorkerForward({
     reminder,
-    templates: deps.config.templates,
+    templates: deps.config().templates,
     message: dm.body,
     suggestedReply,
   });

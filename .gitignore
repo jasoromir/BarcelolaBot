@@ -7,6 +7,7 @@ app/.npmrc
 
 # Google OAuth credentials and tokens
 app/credentials/
+client_secret_*.json
 
 # Environment variables
 .env

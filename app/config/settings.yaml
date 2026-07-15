@@ -36,11 +36,20 @@ guide_notify:
   poll_interval_seconds: 60     # check every minute for tours entering the send window
   test_mode: false              # when true, send to test_group_id instead of the guide's phone
   test_group_id: "120363425214664727@g.us"  # Barcelola BOT🌻 group (debug target)
-  day_before:                   # optional day-before reminder, only for listed guides
+  day_before:                   # day-before reminder — now sent to ALL guides
     enabled: true
     send_time: "18:00"          # local (Europe/Madrid) time to send the evening before
-    guide_names:
-      - "אדיר"                  # aka רידא — requested the day-before reminder
+    # guide_names omitted → sends to all guides in guides.yaml
+  checklist_poll:               # native WhatsApp poll (checklist) sent after the pre-tour roster
+    enabled: true
+    question: "✅ צ׳ק ליסט לפני הסיור"
+    note: "סמנו ✔️ כל משימה בסקר למטה כדי לוודא שלא שכחתם כלום 🙌"
+    items:
+      - "🕒 להגיע 15 דקות לפני תחילת הסיור"
+      - "📋 לסמן נוכחות ב-Wix"
+      - "📸 לצלם תמונה קבוצתית בסוף הסיור ולשתף בקבוצה"
+    guide_names:                # send the poll ONLY to these guides (omit to send to all)
+      - "אדיר"                  # aka רידא — also gets the day-before reminder
 moderation:
   enabled: true
   # Enforcement (delete + kick) happens ONLY in these groups. Detection and
@@ -96,3 +105,18 @@ moderation:
   # Never delete/kick these numbers, even if a message scores as spam.
   never_action_phones:
     - "+34623964800"   # official contact
+private_tours:
+  enabled: true                 # service account is set up and verified against production calendar
+  calendar_id: "guidesbarcelola@gmail.com"
+  sync:
+    enabled: true                # daily fetch+parse batch (only runs if private_tours.enabled is also true)
+    cron: "0 18 * * *"           # 18:00 local, daily
+    window_days_back: 0
+    window_days_forward: 14
+  notify:
+    enabled: true                # day-before guide+manager notify
+    send_time: "18:30"
+    poll_interval_seconds: 60
+    test_mode: false             # verified against test group; now sends to real guide/manager phones
+    test_group_id: "120363425214664727@g.us"  # Barcelola BOT🌻 group (debug target)
+    manager_guide_name: "ליאנה"

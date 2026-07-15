@@ -71,6 +71,21 @@ export const TemplatesConfigSchema = z.object({
   no_reply_alert: z.string().min(1),
   worker_forward: z.string().min(1),
   cancel_notice: z.string().min(1),
+  // Private (custom, non-catalog) tour day-before reminder, sent to the
+  // assigned guide and the manager. Optional with a default so an older
+  // overlay templates.yaml on the volume doesn't crash boot when this is added.
+  private_tour_guide_reminder: z
+    .string()
+    .min(1)
+    .default(
+      'היי {guide_name} 👋\nתזכורת לסיור *פרטי* של מחר 🗓️\n\n🔒 *סיור פרטי* — לא מהקטלוג הכללי\n🚩 *{tour_name}*\n🕒 מחר בשעה *{time}*\n👤 *{client_name}* ({people_count} משתתפים)\n📞 {client_phone}\n{meeting_point_line}\n\n⏰ *חשוב להגיע לנקודת המפגש לפחות 15 דקות לפני תחילת הסיור.*\n\nסיור נעים! 🎉\n',
+    ),
+  // Appended only to the manager's copy when the parsed booking is missing
+  // guide/phone/meeting-point info she should chase down.
+  private_tour_missing_info_block: z
+    .string()
+    .min(1)
+    .default('\n⚠️ *חסרים פרטים לבירור:*\n{missing_fields_list}\n'),
 });
 export type TemplatesConfig = z.infer<typeof TemplatesConfigSchema>;
 
@@ -144,8 +159,27 @@ export const SettingsConfigSchema = z.object({
           enabled: z.boolean(),
           // Local (timezone) clock time HH:MM to send the evening before.
           send_time: z.string().regex(/^\d{2}:\d{2}$/),
-          // Guide names (exact Wix resource name) who opted into this reminder.
-          guide_names: z.array(z.string().min(1)),
+          // Guide names (exact Wix resource name) who get this reminder. Omit or
+          // leave empty to send to ALL guides.
+          guide_names: z.array(z.string().min(1)).optional(),
+        })
+        .optional(),
+      // Optional native WhatsApp poll sent right after the pre-tour roster as a
+      // checklist the guide ticks off. Items are free text (add more anytime).
+      checklist_poll: z
+        .object({
+          enabled: z.boolean(),
+          // Poll title/question line shown above the options.
+          question: z.string().min(1),
+          // Short note (sent as a text message before the poll) nudging the
+          // guide to actually tick each item.
+          note: z.string().min(1),
+          // The checkable items, in display order. At least one required.
+          items: z.array(z.string().min(1)).min(1),
+          // Optional allowlist of guide names (exact Wix resource name). When
+          // present, the poll is sent ONLY to these guides after their roster;
+          // omit (or leave empty) to send it to every guide.
+          guide_names: z.array(z.string().min(1)).optional(),
         })
         .optional(),
     })
@@ -168,6 +202,39 @@ export const SettingsConfigSchema = z.object({
       keywords: z.array(z.string().min(1)),
       // Phones that must never be deleted/kicked (official contact, staff).
       never_action_phones: z.array(PhoneSchema),
+    })
+    .optional(),
+  // Private (custom, non-catalog) tour bookings sourced from a Google
+  // Calendar. Off by default; enable once the service account is set up and
+  // the calendar has been shared with it.
+  private_tours: z
+    .object({
+      enabled: z.boolean(),
+      calendar_id: z.string().min(1).default('guidesbarcelola@gmail.com'),
+      // Daily batch: fetch + LLM-parse new/changed private bookings.
+      sync: z
+        .object({
+          enabled: z.boolean(),
+          cron: CronSchema.default('0 18 * * *'),
+          window_days_back: z.number().int().nonnegative().default(0),
+          window_days_forward: z.number().int().positive().default(14),
+        })
+        .optional(),
+      // Day-before notify: reminds the assigned guide + manager about
+      // tomorrow's private tours.
+      notify: z
+        .object({
+          enabled: z.boolean(),
+          send_time: z.string().regex(/^\d{2}:\d{2}$/),
+          poll_interval_seconds: z.number().int().positive(),
+          // When true, send to test_group_id instead of real guide phones (debug).
+          test_mode: z.boolean().optional(),
+          test_group_id: GroupIdSchema.optional(),
+          // Guide name (exact guides.yaml entry) always notified in addition to
+          // the assigned guide — the manager who chases down missing info.
+          manager_guide_name: z.string().min(1).default('ליאנה'),
+        })
+        .optional(),
     })
     .optional(),
 });

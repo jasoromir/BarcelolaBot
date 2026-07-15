@@ -23,6 +23,7 @@ tour_block: |
   {emoji} {time_range}
   *{name_he}*
   {description_he}
+  
   *נקודת מפגש:* נפגשים ב-{meeting_point_he} בשעה {meeting_time}
   {maps_url_line}
 
@@ -142,3 +143,23 @@ cancel_notice: |
   _{customer_message}_
 
   *סטטוס Wix:* {wix_status}
+
+private_tour_guide_reminder: |
+  היי {guide_name} 👋
+  תזכורת לסיור *פרטי* של מחר 🗓️
+
+  🔒 *סיור פרטי* — לא מהקטלוג הכללי
+  🚩 *{tour_name}*
+  🕒 מחר בשעה *{time}*
+  👤 *{client_name}* ({people_count} משתתפים)
+  📞 {client_phone}
+  {meeting_point_line}
+
+  ⏰ *חשוב להגיע לנקודת המפגש לפחות 15 דקות לפני תחילת הסיור.*
+
+  סיור נעים! 🎉
+
+private_tour_missing_info_block: |
+
+  ⚠️ *חסרים פרטים לבירור:*
+  {missing_fields_list}

@@ -4,7 +4,7 @@
 # them. `name` must match the Wix resource name character-for-character.
 guides:
   - name: "ליאנה"
-    phone: "+34651886491"
+    phone: "+34623964800"
     active: true
   - name: "עדי"
     phone: "+34669705817"
@@ -14,4 +14,7 @@ guides:
     active: true
   - name: "גאות"
     phone: "+972543112097"
+    active: true
+  - name: "נעמי"
+    phone: "+34625271280"
     active: true

@@ -93,3 +93,36 @@ export function buildGuideDayBeforeReminder(opts: BuildGuideDayBeforeOpts): stri
 
   return lines.join('\n');
 }
+
+export interface ChecklistPollConfig {
+  enabled: boolean;
+  question: string;
+  note: string;
+  items: string[];
+  /** When set, the poll is sent only to these guide names; omit to send to all. */
+  guideNames?: string[];
+}
+
+export interface BuiltChecklistPoll {
+  /** Poll title line. */
+  question: string;
+  /** Checkable options (WhatsApp allows up to 12, each ≤100 chars). */
+  options: string[];
+}
+
+/**
+ * Assembles the pre-tour checklist poll from config. WhatsApp caps a poll at
+ * 12 options of ≤100 chars each; we trim to stay within those limits so a long
+ * items list (added over time) can never make the send fail. Returns null when
+ * the poll is disabled or has no usable items.
+ */
+export function buildChecklistPoll(cfg: ChecklistPollConfig | undefined): BuiltChecklistPoll | null {
+  if (!cfg?.enabled) return null;
+  const options = cfg.items
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .slice(0, 12)
+    .map((s) => (s.length > 100 ? s.slice(0, 100) : s));
+  if (options.length === 0) return null;
+  return { question: cfg.question.trim() || '✅', options };
+}

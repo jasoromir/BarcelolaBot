@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildGuideRosterMessage,
   buildGuideDayBeforeReminder,
+  buildChecklistPoll,
 } from '../../src/messaging/guideRosterMessage.js';
 import type { GuideTourRoster } from '../../src/types.js';
 
@@ -85,5 +86,34 @@ describe('buildGuideDayBeforeReminder', () => {
     const msg = buildGuideDayBeforeReminder({ roster: baseRoster });
     expect(msg).not.toContain('נקודת מפגש');
     expect(msg).toContain('15 דקות');
+  });
+});
+
+describe('buildChecklistPoll', () => {
+  const cfg = {
+    enabled: true,
+    question: '✅ צ׳ק ליסט לפני הסיור',
+    note: 'סמנו כל משימה',
+    items: ['🕒 להגיע 15 דקות לפני', '📋 לסמן נוכחות ב-Wix', '📸 תמונה קבוצתית'],
+  };
+
+  it('returns question + options when enabled', () => {
+    const poll = buildChecklistPoll(cfg);
+    expect(poll).not.toBeNull();
+    expect(poll!.question).toBe('✅ צ׳ק ליסט לפני הסיור');
+    expect(poll!.options).toHaveLength(3);
+    expect(poll!.options[0]).toContain('להגיע');
+  });
+
+  it('returns null when disabled or undefined', () => {
+    expect(buildChecklistPoll(undefined)).toBeNull();
+    expect(buildChecklistPoll({ ...cfg, enabled: false })).toBeNull();
+  });
+
+  it('drops blank items and caps at 12 options', () => {
+    const many = { ...cfg, items: ['  ', ...Array.from({ length: 15 }, (_, i) => `item ${i}`)] };
+    const poll = buildChecklistPoll(many);
+    expect(poll!.options).toHaveLength(12);
+    expect(poll!.options).not.toContain('  ');
   });
 });

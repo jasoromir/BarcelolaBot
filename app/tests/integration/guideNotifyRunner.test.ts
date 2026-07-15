@@ -44,6 +44,14 @@ function makeDeps(rosters: GuideTourRoster[], overrides: Partial<Parameters<type
       sent.push({ kind: 'group', to: gid, body });
       return { messageId: `g-${sent.length}` };
     },
+    sendPollDirect: async (phone, question) => {
+      sent.push({ kind: 'direct', to: phone, body: `[POLL] ${question}` });
+      return { messageId: `poll-${sent.length}` };
+    },
+    sendPollToGroup: async (gid, question) => {
+      sent.push({ kind: 'group', to: gid, body: `[POLL] ${question}` });
+      return { messageId: `poll-${sent.length}` };
+    },
   };
   const wix: Partial<WixClient> = {
     getGuideRostersForDate: async () => rosters,
@@ -56,10 +64,10 @@ function makeDeps(rosters: GuideTourRoster[], overrides: Partial<Parameters<type
     wix: wix as WixClient,
     store,
     logger: noopLogger,
-    config: {
+    config: () => ({
       guides: { guides: [{ name: 'ליאנה', phone: '+34651886491', active: true }] },
       tours: { tours: {} },
-    },
+    }),
     settings: { minutesBefore: 15, pollIntervalSeconds: 60, testMode: false },
     timezone: 'Europe/Madrid',
     isPaused: () => false,
@@ -118,6 +126,56 @@ describe('guideNotifyRunner.tick', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('picks up a guide phone change on the NEXT tick without recreating the runner (regression: config must be a live getter, not a startup snapshot)', async () => {
+    // Two distinct tour occurrences, staggered so only rosterA is inside the
+    // 15-min window on the first tick; rosterB enters the window only once
+    // "now" advances on the second tick.
+    const rosterA = { ...rosterInWindow, eventId: 'evt-a' };
+    const rosterB = { ...rosterInWindow, eventId: 'evt-b', startAtIso: '2026-07-02T15:20:00.000Z' };
+    let guidePhone = '+34651886491'; // old number
+    let nowValue = new Date('2026-07-02T14:50:00.000Z');
+    const sent: Sent[] = [];
+    const wa: Partial<WhatsAppClient> = {
+      sendDirect: async (phone, body) => {
+        sent.push({ kind: 'direct', to: phone, body });
+        return { messageId: `dm-${sent.length}` };
+      },
+      sendToGroup: async () => ({ messageId: 'g' }),
+    };
+    const wix: Partial<WixClient> = {
+      getGuideRostersForDate: async () => [rosterA, rosterB],
+    };
+    const db = openDatabase(tmpDbPath());
+    const store = new GuideNotificationsStore(db);
+    const runner = createGuideNotifyRunner({
+      wa: wa as WhatsAppClient,
+      wix: wix as WixClient,
+      store,
+      logger: noopLogger,
+      // Live getter reading a mutable outer variable — simulates index.ts's
+      // `config: () => ({ guides: config.guides, ... })` closing over the
+      // reassignable `config` binding that reloadConfig() replaces.
+      config: () => ({
+        guides: { guides: [{ name: 'ליאנה', phone: guidePhone, active: true }] },
+        tours: { tours: {} },
+      }),
+      settings: { minutesBefore: 15, pollIntervalSeconds: 60, testMode: false },
+      timezone: 'Europe/Madrid',
+      isPaused: () => false,
+      isConnected: () => true,
+      now: () => nowValue,
+    });
+
+    await runner.tick(); // only evt-a is due; sends to the OLD number
+    guidePhone = '+34623964800'; // simulate an /admin/api/config/reload after a guides.yaml edit
+    nowValue = new Date('2026-07-02T15:10:00.000Z'); // now evt-b enters the window
+    await runner.tick(); // sends evt-b — must use the NEW number
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.to).toBe('+34651886491');
+    expect(sent[1]!.to).toBe('+34623964800');
+  });
+
   it('routes to the test group when test_mode is on, regardless of guide phone', async () => {
     const roster = { ...rosterInWindow, guideName: 'נעמי' }; // no phone mapping
     const { runner, sent } = makeDeps([roster], {
@@ -133,6 +191,79 @@ describe('guideNotifyRunner.tick', () => {
     expect(sent[0]!.kind).toBe('group');
     expect(sent[0]!.to).toBe('120363425214664727@g.us');
   });
+
+  it('sends the checklist poll right after the roster when enabled', async () => {
+    const { runner, sent } = makeDeps([rosterInWindow], {
+      settings: {
+        minutesBefore: 15,
+        pollIntervalSeconds: 60,
+        testMode: false,
+        checklistPoll: {
+          enabled: true,
+          question: '✅ צ׳ק ליסט',
+          note: 'סמנו כל משימה',
+          items: ['🕒 להגיע מוקדם', '📋 נוכחות ב-Wix', '📸 תמונה קבוצתית'],
+        },
+      },
+    });
+    await runner.tick();
+    // roster DM, then the note DM, then the poll DM — all to the guide.
+    expect(sent).toHaveLength(3);
+    expect(sent[0]!.body).toContain('רוני טל'); // roster
+    expect(sent[1]!.body).toContain('סמנו כל משימה'); // note
+    expect(sent[2]!.body).toContain('[POLL] ✅ צ׳ק ליסט'); // poll
+    expect(sent.every((s) => s.to === '+34651886491')).toBe(true);
+  });
+
+  it('sends the poll only to a guide on the checklist guide_names allowlist', async () => {
+    const { runner, sent } = makeDeps([rosterInWindow], {
+      settings: {
+        minutesBefore: 15,
+        pollIntervalSeconds: 60,
+        testMode: false,
+        checklistPoll: {
+          enabled: true,
+          question: '✅ צ׳ק ליסט',
+          note: 'סמנו',
+          items: ['🕒 מוקדם'],
+          guideNames: ['ליאנה'], // rosterInWindow guide IS ליאנה
+        },
+      },
+    });
+    await runner.tick();
+    // roster + note + poll = 3
+    expect(sent).toHaveLength(3);
+    expect(sent.some((s) => s.body.startsWith('[POLL]'))).toBe(true);
+  });
+
+  it('skips the poll (but still sends the roster) for a guide not on the allowlist', async () => {
+    // Map עדי a phone so the roster sends; poll allowlist only has אדיר.
+    const { runner, sent } = makeDeps([{ ...rosterInWindow, guideName: 'עדי' }], {
+      config: () => ({
+        guides: { guides: [{ name: 'עדי', phone: '+34669705817', active: true }] },
+        tours: { tours: {} },
+      }),
+      settings: {
+        minutesBefore: 15,
+        pollIntervalSeconds: 60,
+        testMode: false,
+        checklistPoll: {
+          enabled: true,
+          question: '✅ צ׳ק ליסט',
+          note: 'סמנו',
+          items: ['🕒 מוקדם'],
+          guideNames: ['אדיר'],
+        },
+      },
+    });
+    await runner.tick();
+    // roster only — no note, no poll
+    expect(sent).toHaveLength(1);
+    expect(sent.some((s) => s.body.startsWith('[POLL]'))).toBe(false);
+  });
+
+  // Guides are exempt from the new-contact restriction (it only gates customer
+  // DMs in DirectMessageSender). The runner no longer checks it.
 });
 
 // A tomorrow tour (relative to the fixed now 2026-07-02): ~24h out, so it never

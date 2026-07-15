@@ -6,14 +6,18 @@ import type { GuideNotificationsStore } from '../persistence/guideNotifications.
 import {
   buildGuideRosterMessage,
   buildGuideDayBeforeReminder,
+  buildChecklistPoll,
+  type ChecklistPollConfig,
 } from '../messaging/guideRosterMessage.js';
+import { resolveGuidePhone } from '../messaging/guideDirectory.js';
+import { todayLocalDate, tomorrowLocalDate, localHHMM } from '../util/localTime.js';
 
 export interface GuideDayBeforeSettings {
   enabled: boolean;
   /** Local (timezone) clock time HH:MM to send the evening before. */
   sendTime: string;
-  /** Guide names (exact Wix resource name) who opted into this reminder. */
-  guideNames: string[];
+  /** Guide names (exact Wix resource name) who get this reminder. Omit/empty = all guides. */
+  guideNames?: string[];
 }
 
 export interface GuideNotifySettings {
@@ -22,6 +26,8 @@ export interface GuideNotifySettings {
   testMode: boolean;
   testGroupId?: string;
   dayBefore?: GuideDayBeforeSettings;
+  /** Optional checklist poll sent right after the pre-tour roster. */
+  checklistPoll?: ChecklistPollConfig;
 }
 
 export interface GuideNotifyRunnerDeps {
@@ -29,7 +35,10 @@ export interface GuideNotifyRunnerDeps {
   wix: WixClient;
   store: GuideNotificationsStore;
   logger: AppLogger;
-  config: { guides: GuidesConfig; tours: ToursConfig };
+  /** Getter, not a static snapshot — so a config reload (e.g. an edited
+   *  guides.yaml pushed via /admin/api/config/reload) is picked up on the
+   *  next tick instead of staying frozen at whatever was loaded at startup. */
+  config: () => { guides: GuidesConfig; tours: ToursConfig };
   settings: GuideNotifySettings;
   timezone: string;
   isPaused: () => boolean;
@@ -57,51 +66,48 @@ function dayBeforeKey(r: GuideTourRoster): string {
   return `db:${tourKey(r)}`;
 }
 
-function todayLocalDate(now: Date, tz: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now);
-  const y = parts.find((p) => p.type === 'year')?.value;
-  const m = parts.find((p) => p.type === 'month')?.value;
-  const d = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${d}`;
-}
-
-/** Local date (YYYY-MM-DD) shifted by +1 day, in the given timezone. */
-function tomorrowLocalDate(now: Date, tz: string): string {
-  return todayLocalDate(new Date(now.getTime() + 24 * 60 * 60 * 1000), tz);
-}
-
-/** Current wall-clock time as "HH:MM" in the given timezone. */
-function localHHMM(now: Date, tz: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(now);
-}
-
 export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotifyRunner {
   let handle: NodeJS.Timeout | null = null;
   const now = () => (deps.now ?? (() => new Date()))();
 
-  // Build a name→phone lookup once per tick (cheap; keeps config hot-reloadable).
-  function resolveGuidePhone(guideName: string | undefined): string | null {
-    if (!guideName) return null;
-    const match = deps.config.guides.guides.find(
-      (g) => g.active !== false && g.name === guideName,
-    );
-    return match?.phone ?? null;
+  // Send the pre-tour checklist poll right after the roster message. The short
+  // note goes first (a poll message can't carry body text), then the poll
+  // itself. Best-effort: a poll failure never fails the roster send — the
+  // roster is the important part; the poll is a nice-to-have nudge.
+  async function sendChecklistPoll(
+    target: { kind: 'group'; id: string } | { kind: 'direct'; id: string },
+    guideName: string | undefined,
+  ): Promise<void> {
+    const cfg = deps.settings.checklistPoll;
+    // Optional per-guide allowlist: when set, only listed guides get the poll.
+    const allow = cfg?.guideNames;
+    if (allow && allow.length > 0 && (!guideName || !allow.includes(guideName))) return;
+    const poll = buildChecklistPoll(cfg);
+    if (!poll) return;
+    const note = deps.settings.checklistPoll?.note?.trim();
+    try {
+      if (target.kind === 'group') {
+        if (note) await deps.wa.sendToGroup(target.id, note);
+        await deps.wa.sendPollToGroup(target.id, poll.question, poll.options);
+      } else {
+        if (note) await deps.wa.sendDirect(target.id, note);
+        await deps.wa.sendPollDirect(target.id, poll.question, poll.options);
+      }
+    } catch (err) {
+      deps.logger.warn({
+        source: 'guide_notify',
+        eventType: 'checklist_poll_failed',
+        message: (err as Error).message,
+        metadata: { guide: guideName, target: target.kind },
+      });
+    }
   }
 
   async function tick() {
     const stats = { due: 0, sent: 0, skipped: 0, failed: 0 };
     if (deps.isPaused() || !deps.isConnected()) return stats;
 
+    const cfg = deps.config();
     const nowMs = now().getTime();
     const windowMs = deps.settings.minutesBefore * 60 * 1000;
     const date = todayLocalDate(now(), deps.timezone);
@@ -130,9 +136,9 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
       if (deps.store.wasHandled(key)) continue;
       stats.due += 1;
 
-      const tourNameHe = deps.config.tours.tours[roster.serviceId]?.name_he;
+      const tourNameHe = cfg.tours.tours[roster.serviceId]?.name_he;
       const body = buildGuideRosterMessage({ roster, tourNameHe });
-      const guidePhone = resolveGuidePhone(roster.guideName);
+      const guidePhone = resolveGuidePhone(cfg.guides, roster.guideName);
 
       // Debug mode: everything goes to the test group regardless of phone.
       if (deps.settings.testMode && deps.settings.testGroupId) {
@@ -150,6 +156,10 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
             status: 'sent',
           });
           stats.sent += 1;
+          await sendChecklistPoll(
+            { kind: 'group', id: deps.settings.testGroupId },
+            roster.guideName,
+          );
         } catch (err) {
           stats.failed += 1;
           deps.logger.error({
@@ -186,6 +196,11 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
         continue;
       }
 
+      // NOTE: The new-contact restriction does NOT apply to guides. They are
+      // known contacts listed in guides.yaml, not cold customers. The restriction
+      // only gates customer DMs in the DirectMessageSender; guide roster sends
+      // always go through unconditionally.
+
       try {
         const res = await deps.wa.sendDirect(guidePhone, body);
         deps.store.record({
@@ -212,6 +227,7 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
             start: roster.startAtIso,
           },
         });
+        await sendChecklistPoll({ kind: 'direct', id: guidePhone }, roster.guideName);
       } catch (err) {
         stats.failed += 1;
         deps.logger.error({
@@ -238,10 +254,14 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
     skipped: number;
     failed: number;
   }): Promise<void> {
-    const cfg = deps.settings.dayBefore;
-    if (!cfg?.enabled || cfg.guideNames.length === 0) return;
-    if (localHHMM(now(), deps.timezone) < cfg.sendTime) return;
+    const dayBeforeCfg = deps.settings.dayBefore;
+    if (!dayBeforeCfg?.enabled) return;
+    if (localHHMM(now(), deps.timezone) < dayBeforeCfg.sendTime) return;
+    // Empty/omitted guide_names → send to ALL guides (same convention as the
+    // checklist poll). A non-empty list restricts it to just those guides.
+    const allowAll = !dayBeforeCfg.guideNames || dayBeforeCfg.guideNames.length === 0;
 
+    const cfg = deps.config();
     const date = tomorrowLocalDate(now(), deps.timezone);
     let rosters: GuideTourRoster[];
     try {
@@ -256,21 +276,22 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
     }
 
     for (const roster of rosters) {
-      if (!roster.guideName || !cfg.guideNames.includes(roster.guideName)) continue;
+      if (!roster.guideName) continue;
+      if (!allowAll && !dayBeforeCfg.guideNames!.includes(roster.guideName)) continue;
       if (roster.attendees.length === 0) continue;
 
       const key = dayBeforeKey(roster);
       if (deps.store.wasHandled(key)) continue;
       stats.due += 1;
 
-      const tourCfg = deps.config.tours.tours[roster.serviceId];
+      const tourCfg = cfg.tours.tours[roster.serviceId];
       const body = buildGuideDayBeforeReminder({
         roster,
         tourNameHe: tourCfg?.name_he,
         meetingPointHe: tourCfg?.meeting_point_he,
         mapsUrl: tourCfg?.google_maps_url,
       });
-      const guidePhone = resolveGuidePhone(roster.guideName);
+      const guidePhone = resolveGuidePhone(cfg.guides, roster.guideName);
 
       const target =
         deps.settings.testMode && deps.settings.testGroupId
@@ -300,6 +321,10 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
         });
         continue;
       }
+
+      // NOTE: Guides are exempt from the new-contact restriction (see pre-tour
+      // pass comment). They are known contacts; the restriction only gates
+      // customer DMs in DirectMessageSender.
 
       try {
         const res =
@@ -356,8 +381,8 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
       }, intervalMs);
       const db = deps.settings.dayBefore;
       const dbNote =
-        db?.enabled && db.guideNames.length > 0
-          ? `; day-before ${db.sendTime} for ${db.guideNames.length} guide(s)`
+        db?.enabled
+          ? `; day-before ${db.sendTime} for ${db.guideNames?.length ?? 'all'} guide(s)`
           : '';
       deps.logger.info({
         source: 'guide_notify',

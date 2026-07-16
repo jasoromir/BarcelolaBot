@@ -31,6 +31,7 @@ export interface HandleInput {
       phone: string;
       kind: string;
       name: string;
+      body?: string;
     }): Promise<{ status: string }>;
   };
 }
@@ -60,6 +61,15 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
       message: `duplicate booking ${event.bookingId}`,
     });
     return { outcome: 'duplicate' };
+  }
+  // Wix fires both a sessions_booked automation (flat format, keyed by
+  // order_id when booking_id is absent) and a REST webhook (nested format,
+  // keyed by the real booking_id). If both arrive, the first one claims its
+  // key successfully but the second uses a *different* key and would bypass
+  // dedup. Claim the eCommerce order_id too so the second webhook (whichever
+  // format it is) is caught as a duplicate.
+  if (event.orderIdEcom && event.orderIdEcom !== event.bookingId) {
+    input.dedup.tryClaim(event.orderIdEcom);
   }
 
   if (input.isPaused()) {
@@ -201,6 +211,7 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
             phone,
             kind: combined ? 'welcome + confirmation' : 'welcome',
             name: event.clientName,
+            body,
           })
           .then((result) => {
             if (reminders) {

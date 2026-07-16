@@ -10,7 +10,25 @@ export interface RunOpts {
   fn: (ctx: { jobRunId: number }) => Promise<Omit<JobOutcome, 'jobName' | 'dryRun'>>;
 }
 
+const runningJobs = new Set<JobName>();
+
 export async function runJob(opts: RunOpts): Promise<JobOutcome> {
+  if (runningJobs.has(opts.jobName)) {
+    opts.logger.warn({
+      source: 'jobs',
+      eventType: `${opts.jobName}_already_running`,
+      message: `${opts.jobName} already running, skipping duplicate invocation`,
+    });
+    return {
+      jobName: opts.jobName,
+      dryRun: opts.dryRun,
+      status: 'skipped',
+      toursCount: 0,
+      groupsSent: 0,
+      groupsClosed: 0,
+    };
+  }
+  runningJobs.add(opts.jobName);
   const id = opts.history.start(opts.jobName, { dryRun: opts.dryRun });
   opts.logger.info({
     source: 'jobs',
@@ -52,5 +70,7 @@ export async function runJob(opts: RunOpts): Promise<JobOutcome> {
       groupsClosed: 0,
       error: errMsg,
     };
+  } finally {
+    runningJobs.delete(opts.jobName);
   }
 }

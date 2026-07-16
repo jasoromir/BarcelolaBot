@@ -500,7 +500,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       return { messageId: (msg as any)?.id?._serialized ?? '' };
     }
     const msg = await client.sendMessage(groupId, body);
-    return { messageId: msg.id._serialized };
+    return { messageId: (msg as any)?.id?._serialized ?? '' };
   }
 
   /**
@@ -649,7 +649,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       }
       try { await (chat as any).clearState(); } catch { /* best-effort */ }
       const msg = await chat.sendMessage(body, { linkPreview: false } as any);
-      return { messageId: (msg as any).id._serialized };
+      return { messageId: (msg as any)?.id?._serialized ?? '' };
     };
 
     try {
@@ -667,7 +667,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
         }
       }
       const msg = await client.sendMessage(chatId, body, { linkPreview: false });
-      return { messageId: msg.id._serialized };
+      return { messageId: (msg as any)?.id?._serialized ?? '' };
     }
   }
 
@@ -715,7 +715,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       await forceSyncLid(phoneE164);
       const poll = new Poll(question, options, { allowMultipleAnswers, messageSecret: undefined });
       const msg = await client.sendMessage(chatId, poll);
-      return { messageId: (msg as any).id._serialized };
+      return { messageId: (msg as any)?.id?._serialized ?? '' };
     });
   }
 
@@ -728,7 +728,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   ): Promise<SendResult> {
     const poll = new Poll(question, options, { allowMultipleAnswers, messageSecret: undefined });
     const msg = await client.sendMessage(groupId, poll);
-    return { messageId: (msg as any).id._serialized };
+    return { messageId: (msg as any)?.id?._serialized ?? '' };
   }
 
   async function isGroupAdmin(groupId: string): Promise<boolean> {
@@ -887,7 +887,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     const messages = await chat.fetchMessages({ limit });
 
     return messages.map((msg: any) => ({
-      id: msg.id._serialized,
+      id: msg.id?._serialized ?? '',
       body: msg.body || '',
       type: msg.type,
       timestamp: msg.timestamp,
@@ -917,7 +917,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       .sort((a: any, b: any) => b.timestamp - a.timestamp)
       .slice(0, limit)
       .map((m: any) => ({
-        id: m.id._serialized,
+        id: m.id?._serialized ?? '',
         ack: typeof m.ack === 'number' ? m.ack : 0,
         ackName: ackName(typeof m.ack === 'number' ? m.ack : 0),
         timestamp: m.timestamp,

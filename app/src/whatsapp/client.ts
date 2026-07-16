@@ -742,86 +742,18 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   }
 
   async function isGroupAdmin(groupId: string): Promise<boolean> {
-    // client.getChatById(groupId) internally calls fetchMessages-adjacent
-    // machinery that throws an opaque "r" on this session (same root cause as
-    // the guide-photos forwarding bug). Read participants straight from the
-    // in-memory Store instead, bypassing the broken wrapper entirely. Compare
-    // against WhatsApp Web's own notion of "me" (window.Store.User / the
-    // meUser wid) rather than client.info.wid — this account is LID-migrated,
-    // so participants list ids are @lid while client.info.wid is @c.us and
-    // never matches.
-    try {
-      const result = await client.pupPage!.evaluate(async (cid: string) => {
-        const w = globalThis as any;
-        const chat = await w.WWebJS.getChat(cid, { getAsModel: false });
-        if (!chat) return { isAdmin: false, debug: 'no chat' };
-        const coll = chat.groupMetadata?.participants;
-        let list: any[] = [];
-        if (coll?.getModelsArray) list = coll.getModelsArray();
-        else if (coll?.serialize) list = coll.serialize();
-        else if (Array.isArray(coll)) list = coll;
-        else if (coll?._models) list = Object.values(coll._models);
-
-        const meCandidates = [
-          w.Store?.User?.getMaybeMeUser?.()?._serialized,
-          w.Store?.User?.getMeUser?.()?._serialized,
-          w.Store?.Conn?.wid?._serialized,
-          w.Store?.Conn?.me?._serialized,
-          w.Store?.Conn?.lid,
-        ].filter(Boolean);
-
-        const idOf = (p: any) => p?.id?._serialized ?? p?.id;
-        let found = list.find((p: any) => meCandidates.includes(idOf(p)));
-        // Fallback: every participant whose message we've sent (fromMe=true)
-        // carries a `participant` field on the underlying event equal to our
-        // own LID — but we don't have a message here, so instead just look
-        // for the one admin whose id contains no phone-shaped digits at all
-        // is NOT reliable either. Last resort: dump full Conn fields so we
-        // can see the real shape live instead of guessing further.
-        if (!found) {
-          found = list.find((p: any) => Boolean(p?.isAdmin) && idOf(p)?.endsWith('@lid'));
-        }
-        const isAdmin = Boolean(found?.isAdmin);
-        const connKeys = w.Store?.Conn ? Object.keys(w.Store.Conn) : [];
-        return {
-          isAdmin,
-          debug: `listLen=${list.length} me=${JSON.stringify(meCandidates)} found=${JSON.stringify(found ?? null)} connKeys=${JSON.stringify(connKeys)}`,
-        };
-      }, groupId);
-      console.log(`[wa:isGroupAdmin] ${groupId} -> ${JSON.stringify(result)}`);
-      return Boolean((result as any)?.isAdmin);
-    } catch (err) {
-      console.error(`[wa:isGroupAdmin] evaluate failed for ${groupId}:`, (err as Error)?.message ?? err);
-      return false;
-    }
+    const chat = await client.getChatById(groupId);
+    const selfId = client.info?.wid?._serialized;
+    if (!selfId) return false;
+    const participants = (chat as unknown as { participants?: Array<{ id: { _serialized: string }; isAdmin: boolean }> })
+      .participants ?? [];
+    return participants.some((p) => p.id._serialized === selfId && p.isAdmin);
   }
 
   async function setGroupMessagesAdminsOnly(groupId: string, adminsOnly: boolean): Promise<void> {
-    // client.getChatById(groupId) throws the same opaque "r" as elsewhere on
-    // this session. whatsapp-web.js's own GroupChat.setMessagesAdminsOnly
-    // internally re-resolves the chat via WWebJS.getChat(..., {getAsModel:
-    // false}) anyway (the working raw path) — so call that action directly
-    // instead of going through getChatById first.
-    const success = await client.pupPage!.evaluate(
-      async (cid: string, announce: boolean) => {
-        const w = globalThis as any;
-        const chat = await w.WWebJS.getChat(cid, { getAsModel: false });
-        if (!chat) return false;
-        try {
-          await w.require('WAWebSetPropertyGroupAction').setGroupProperty(
-            chat,
-            'announcement',
-            announce ? 1 : 0,
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      groupId,
-      adminsOnly,
-    );
-    if (!success) throw new Error(`setGroupMessagesAdminsOnly failed for ${groupId}`);
+    const chat = await client.getChatById(groupId);
+    await (chat as unknown as { setMessagesAdminsOnly: (v: boolean) => Promise<void> })
+      .setMessagesAdminsOnly(adminsOnly);
   }
 
   async function getGroupAdmins(groupId: string): Promise<string[]> {

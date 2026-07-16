@@ -113,6 +113,7 @@ export interface WhatsAppClient {
   onReaction(handler: ReactionHandler): void;
   onGroupMessage(handler: GroupMessageHandler): void;
   onRawGroupMessage(handler: (msg: any, groupId: string) => void): void;
+  onRawDmMedia(handler: (msg: any, fromPhone: string) => void): void;
   onGroupJoin(handler: GroupJoinHandler): void;
 
   sendStickerFromDataUrl(toChatId: string, dataUrl: string): Promise<SendResult>;

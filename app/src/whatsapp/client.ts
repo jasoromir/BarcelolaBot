@@ -112,6 +112,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   const groupMessageHandlers: GroupMessageHandler[] = [];
   const groupJoinHandlers: GroupJoinHandler[] = [];
   const rawGroupMessageHandlers: Array<(msg: any, groupId: string) => void> = [];
+  const rawDmMediaHandlers: Array<(msg: any, fromPhone: string) => void> = [];
   let current: WhatsAppState = { kind: 'disconnected' };
   const setState = (s: WhatsAppState) => {
     current = s;
@@ -367,6 +368,15 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       Promise.resolve(h(dm)).catch((err) => {
         console.error('[wa:dmHandler] error', err);
       });
+    }
+    // Raw DM media hook: passes the original msg object (with downloadMedia)
+    // to handlers that need to capture images/videos from DMs (testing path).
+    if (hasMedia && rawDmMediaHandlers.length > 0 && fromPhoneE164) {
+      for (const h of rawDmMediaHandlers) {
+        try { h(msg, fromPhoneE164); } catch (err) {
+          console.error('[wa:rawDmMediaHandler] error', err);
+        }
+      }
     }
   };
   client.on('message', (msg: any) => {
@@ -1070,6 +1080,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     onReaction: (h: ReactionHandler) => reactionHandlers.push(h),
     onGroupMessage: (h: GroupMessageHandler) => groupMessageHandlers.push(h),
     onRawGroupMessage: (h: (msg: any, groupId: string) => void) => rawGroupMessageHandlers.push(h),
+    onRawDmMedia: (h: (msg: any, fromPhone: string) => void) => rawDmMediaHandlers.push(h),
     onGroupJoin: (h: GroupJoinHandler) => groupJoinHandlers.push(h),
     sendStickerFromDataUrl,
     downloadStickerBytes,

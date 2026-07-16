@@ -298,6 +298,9 @@ async function main(): Promise<void> {
   const guidesGroupId = '34651886491-1578239130@g.us';
   const guidePhotosCollector = createGuidePhotosCollector(guidesGroupId, config.settings.timezone);
   whatsapp.onRawGroupMessage(guidePhotosCollector.onRawMessage);
+  // Also capture images from DMs (used for testing the photo flow without
+  // needing to send to the guides group).
+  whatsapp.onRawDmMedia(guidePhotosCollector.onDmImage);
 
   const app: App = {
     db,

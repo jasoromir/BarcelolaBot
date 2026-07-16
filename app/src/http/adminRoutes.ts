@@ -587,10 +587,63 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
-  // Peek at guide photos collected today (real-time via onRawGroupMessage handler).
+  // Status of collected guide photos (captured in real-time as they arrive).
   exp.get('/admin/api/guide-photos', (_req, res) => {
-    const count = app.guidePhotosCollector?.count() ?? 0;
-    res.json({ collected: count });
+    if (!app.guidePhotosCollector) {
+      res.json({ collected: 0, items: [] });
+      return;
+    }
+    const items = app.guidePhotosCollector.getCollected();
+    res.json({
+      collected: items.length,
+      items: items.map((p) => ({
+        timestamp: p.timestamp,
+        time: new Date(p.timestamp * 1000).toLocaleTimeString('en-GB', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit' }),
+        mimetype: p.mimetype,
+        sizeKb: Math.round(p.data.length / 1024),
+        caption: p.caption || null,
+        source: p.source,
+      })),
+    });
+  });
+
+  // Test endpoint: send collected photos to a target group after an optional
+  // delay. Use this to verify the capture→resend flow end-to-end:
+  // 1. Send an image to the bot (DM or guides group)
+  // 2. Wait for it to appear in GET /admin/api/guide-photos
+  // 3. POST here to send it to the Barcelola BOT test group
+  exp.post('/admin/api/guide-photos/send-test', async (req, res) => {
+    const targetGroupId = (req.body?.target as string) || '120363425214664727@g.us';
+    const delaySec = Number(req.body?.delay_seconds ?? 0);
+    if (!app.guidePhotosCollector) {
+      res.json({ ok: false, error: 'collector not initialized' });
+      return;
+    }
+    const count = app.guidePhotosCollector.count();
+    if (count === 0) {
+      res.json({ ok: false, error: 'no photos captured yet — send an image first' });
+      return;
+    }
+    if (delaySec > 0) {
+      res.json({ ok: true, message: `will send ${count} photo(s) to ${targetGroupId} in ${delaySec}s` });
+      setTimeout(async () => {
+        try {
+          const sent = await app.guidePhotosCollector!.forwardAllTo(
+            targetGroupId,
+            (chatId, media, caption) => app.whatsapp.sendMediaToGroup(chatId, media, caption).then(() => {}),
+          );
+          console.log(`[guide-photos-test] sent ${sent} photos to ${targetGroupId} after ${delaySec}s delay`);
+        } catch (err) {
+          console.error(`[guide-photos-test] delayed send failed:`, (err as Error).message);
+        }
+      }, delaySec * 1000);
+      return;
+    }
+    const forwarded = await app.guidePhotosCollector.forwardAllTo(
+      targetGroupId,
+      (chatId, media, caption) => app.whatsapp.sendMediaToGroup(chatId, media, caption).then(() => {}),
+    );
+    res.json({ ok: true, forwarded, total: count });
   });
 
   // Forward images from a source group to a target group using raw page-level

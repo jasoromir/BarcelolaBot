@@ -29,6 +29,7 @@ export interface ReminderRunnerDeps {
       phone: string;
       kind: string;
       name: string;
+      body?: string;
     }): Promise<unknown>;
   };
 }
@@ -111,6 +112,7 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
             phone: r.phone,
             kind: 'reminder',
             name: r.clientName ?? r.phone,
+            body,
           })
           .catch((err) =>
             deps.logger.error({

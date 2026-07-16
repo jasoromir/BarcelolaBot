@@ -32,6 +32,7 @@ import { createWhatsAppClient } from './whatsapp/client.js';
 import { createWixClient } from './wix/client.js';
 import { DirectMessageSender } from './messaging/directMessage.js';
 import { createDeliveryNotifier } from './messaging/deliveryNotifier.js';
+import { resolveGuidePhone } from './messaging/guideDirectory.js';
 import { createHttpServer } from './http/server.js';
 import { startScheduler } from './scheduler.js';
 import { createEmailer } from './notify/emailer.js';
@@ -131,6 +132,11 @@ async function main(): Promise<void> {
     wa: whatsapp,
     logger,
     workerGroupId: config.settings.reminders.worker_group_id,
+    // Per operator request: when a client can't be auto-notified (permanent
+    // delivery failure — e.g. the WhatsApp-side per-recipient "No LID for
+    // user" case), DM ליאנה directly with an alert + the message text so she
+    // can text the client manually from her own phone.
+    alertPhone: () => resolveGuidePhone(config.guides, 'ליאנה'),
   });
 
   const geminiApiKey = process.env.GEMINI_API_KEY ?? '';

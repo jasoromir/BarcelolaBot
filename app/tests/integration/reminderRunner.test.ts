@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -110,5 +110,16 @@ describe('reminderRunner.tick', () => {
     // Second tick shouldn't pick it up again (no longer 'awaiting_send').
     const stats2 = await runner.tick();
     expect(stats2.attempted).toBe(0);
+  });
+
+  it('passes the exact reminder message body through to notifyDelivery.confirmAndAnnounce', async () => {
+    const confirmAndAnnounce = vi.fn(async () => ({ status: 'delivered' }));
+    const { runner, sent, reminders } = makeRunner({ notifyDelivery: { confirmAndAnnounce } });
+    reminders.upsert(dueBooking);
+    await runner.tick();
+    await new Promise((r) => setImmediate(r));
+    expect(confirmAndAnnounce).toHaveBeenCalledOnce();
+    const arg = confirmAndAnnounce.mock.calls[0][0];
+    expect(arg.body).toBe(sent[0]!.body);
   });
 });

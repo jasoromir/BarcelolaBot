@@ -12,6 +12,14 @@ export interface DeliveryNotifierDeps {
   followUpDelayMs?: number;
   /** How long the follow-up recheck itself polls for. */
   followUpTimeoutMs?: number;
+  /**
+   * Getter (not a static value) resolving the guide who should be told
+   * directly, by DM, whenever a customer send permanently fails (unregistered
+   * / send error / never confirmed delivered) — e.g. ליאנה, per operator
+   * request. Returns null to skip (e.g. guide not found in guides.yaml).
+   * A getter so a guides.yaml hot-reload is picked up without restarting.
+   */
+  alertPhone?: () => string | null;
 }
 
 export interface SendAndAnnounceInput {
@@ -80,6 +88,32 @@ export function createDeliveryNotifier(deps: DeliveryNotifierDeps) {
     );
   }
 
+  /**
+   * On a permanent delivery failure, DM the on-call guide directly (in
+   * addition to the worker-group ping) with (1) an alert explaining the
+   * client couldn't be automatically notified, then (2) the exact message
+   * body the client was supposed to receive, so she can copy/forward it to
+   * them manually from her own phone. Two separate messages so the second
+   * one is copy-pasteable as-is, with no wrapper text mixed in.
+   */
+  async function alertGuide(kind: string, name: string, phone: string, body: string): Promise<void> {
+    const guidePhone = deps.alertPhone?.();
+    if (!guidePhone) return;
+    const alertText =
+      `⚠️ לא הצלחנו להודיע ל${name} (${phone}) על ${kind} באופן אוטומטי — ` +
+      `ההודעה הבאה היא מה שהיה צריך להישלח אליו/ה. אנא שלחי לו/ה ידנית:`;
+    try {
+      await deps.wa.sendDirect(guidePhone, alertText);
+      await deps.wa.sendDirect(guidePhone, body);
+    } catch (err) {
+      deps.logger.error({
+        source: 'delivery',
+        eventType: 'guide_alert_failed',
+        message: `failed to DM guide about undelivered ${kind} to ${name} ${phone}: ${(err as Error).message}`,
+      });
+    }
+  }
+
   async function sendAndAnnounce(input: SendAndAnnounceInput): Promise<DeliveryResult> {
     const { phone, body, kind, name } = input;
 
@@ -98,6 +132,7 @@ export function createDeliveryNotifier(deps: DeliveryNotifierDeps) {
     }
     if (resolved === null) {
       await ping(failurePing(kind, name, phone, 'number not on WhatsApp / unregistered'));
+      await alertGuide(kind, name, phone, body);
       deps.logger.warn({
         source: 'delivery',
         eventType: 'unregistered_number',
@@ -112,6 +147,7 @@ export function createDeliveryNotifier(deps: DeliveryNotifierDeps) {
       messageId = r.messageId;
     } catch (err) {
       await ping(failurePing(kind, name, phone, `send error — ${(err as Error).message}`));
+      await alertGuide(kind, name, phone, body);
       deps.logger.error({
         source: 'delivery',
         eventType: 'send_failed',
@@ -133,6 +169,7 @@ export function createDeliveryNotifier(deps: DeliveryNotifierDeps) {
     }
 
     await ping(failurePing(kind, name, phone, `not confirmed delivered (ack=${ack})`));
+    await alertGuide(kind, name, phone, body);
     deps.logger.warn({
       source: 'delivery',
       eventType: 'not_delivered',
@@ -146,14 +183,18 @@ export function createDeliveryNotifier(deps: DeliveryNotifierDeps) {
    * For messages already sent through another path (e.g. DirectMessageSender,
    * which owns allowlist + offline-queue logic): confirm delivery of an existing
    * messageId and post the same delivered/failed ping. Does not re-send.
+   * `body` (the exact text the client should have received) is optional only
+   * for backward compatibility — pass it whenever available so a permanent
+   * failure can also alert the on-call guide with the message to forward.
    */
   async function confirmAndAnnounce(input: {
     messageId: string;
     phone: string;
     kind: string;
     name: string;
+    body?: string;
   }): Promise<DeliveryResult> {
-    const { messageId, phone, kind, name } = input;
+    const { messageId, phone, kind, name, body } = input;
     const ack = await confirmWithFollowUp(messageId);
     if (ack >= 2) {
       await ping(`✅ Sent ${kind} to ${name}: ${phone}`);
@@ -166,6 +207,7 @@ export function createDeliveryNotifier(deps: DeliveryNotifierDeps) {
       return { status: 'delivered', ack, messageId };
     }
     await ping(failurePing(kind, name, phone, `not confirmed delivered (ack=${ack})`));
+    if (body) await alertGuide(kind, name, phone, body);
     deps.logger.warn({
       source: 'delivery',
       eventType: 'not_delivered',

@@ -45,6 +45,13 @@ export interface ReminderRunner {
 
 export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
   let handle: NodeJS.Timeout | null = null;
+  // Re-entrancy guard: each humanized DM send takes 10-40s (presence + typing
+  // delay), so a tick with several due reminders easily outlives the 30s poll
+  // interval. Without this guard, overlapping ticks re-read the due list
+  // (rows are only marked sent AFTER their send completes) and re-send the
+  // same reminders — seen live on 2026-07-16 as clients receiving the same
+  // reminder up to 6 times.
+  let tickInFlight = false;
 
   async function sendOne(
     r: ReminderRow,
@@ -136,15 +143,21 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
   }
 
   async function tick() {
-    const due = deps.reminders.due(new Date().toISOString());
-    let sent = 0;
-    let deferred = 0;
-    for (const r of due) {
-      const result = await sendOne(r);
-      if (result === 'sent') sent++;
-      else if (result === 'deferred') deferred++;
+    if (tickInFlight) return { attempted: 0, sent: 0, deferred: 0 };
+    tickInFlight = true;
+    try {
+      const due = deps.reminders.due(new Date().toISOString());
+      let sent = 0;
+      let deferred = 0;
+      for (const r of due) {
+        const result = await sendOne(r);
+        if (result === 'sent') sent++;
+        else if (result === 'deferred') deferred++;
+      }
+      return { attempted: due.length, sent, deferred };
+    } finally {
+      tickInFlight = false;
     }
-    return { attempted: due.length, sent, deferred };
   }
 
   async function runNoReplyCheck(minutesBefore: number) {

@@ -1051,39 +1051,35 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     const result = await page.evaluate(async (parts: { fromMe: boolean; remote: string; id: string }) => {
       const w = globalThis as any;
       const ns = w.WWebJS;
-      const store = w.Store;
-      if (!ns || !store?.Msg) return { error: 'no Store/WWebJS' };
 
-      // Build the message key the same way WhatsApp Web does internally.
-      // Try multiple lookup strategies since the Msg store keying is opaque.
+      // Diagnostics: what's actually available?
+      if (!ns) {
+        return { error: `no WWebJS (keys: ${Object.keys(w).filter(k => /store|wwebjs|msg/i.test(k)).join(',') || 'none matching'})` };
+      }
+
+      // Find the message in the chat's in-memory collection (the approach
+      // that works in admin/forward-raw). This doesn't use Store.Msg.get()
+      // (which requires a properly-serialized key that's broken on LID).
       let msg: any = null;
-
-      // Strategy 1: direct get by the composite key string ($1 field format)
-      const compositeKey = `${parts.fromMe}_${parts.remote}_${parts.id}`;
-      msg = store.Msg.get(compositeKey);
-
-      // Strategy 2: look up by the inner _serialized format
-      if (!msg) {
-        const serialized = `false_${parts.remote}_${parts.id}`;
-        msg = store.Msg.get(serialized);
-      }
-
-      // Strategy 3: scan recent messages in the chat for matching msg id
-      if (!msg) {
-        try {
-          const chat = await ns.getChat(parts.remote, { getAsModel: false });
-          if (chat?.msgs) {
-            const models = chat.msgs.getModelsArray ? chat.msgs.getModelsArray() : [];
-            msg = models.find((m: any) => m.id?.id === parts.id);
+      try {
+        const chat = await ns.getChat(parts.remote, { getAsModel: false });
+        if (chat?.msgs) {
+          const models = chat.msgs.getModelsArray ? chat.msgs.getModelsArray() : [];
+          msg = models.find((m: any) => m.id?.id === parts.id);
+          if (!msg) {
+            return { error: `msg not in chat (${models.length} in memory, looking for id=${parts.id})` };
           }
-        } catch { /* best effort */ }
+        } else {
+          return { error: 'chat has no msgs collection' };
+        }
+      } catch (e: any) {
+        return { error: `getChat failed: ${e?.message || String(e)}` };
       }
 
-      if (!msg) return { error: `msg not found (key=${compositeKey})` };
-
+      // Download using WWebJS.downloadMedia (the internal raw download path)
       try {
         const blob = await ns.downloadMedia(msg);
-        if (!blob) return { error: 'downloadMedia returned null' };
+        if (!blob) return { error: 'WWebJS.downloadMedia returned null' };
         const ab = await blob.arrayBuffer();
         const bytes = new Uint8Array(ab);
         let binary = '';

@@ -37,7 +37,6 @@ import { createHttpServer } from './http/server.js';
 import { startScheduler } from './scheduler.js';
 import { createEmailer } from './notify/emailer.js';
 import { createSessionMonitor } from './notify/sessionMonitor.js';
-import { createGuidePhotosCollector } from './jobs/guidePhotosCollector.js';
 import type { App } from './app.js';
 import type { SessionMonitor } from './notify/sessionMonitor.js';
 
@@ -293,18 +292,8 @@ async function main(): Promise<void> {
     });
   }
 
-  // Collect guide photos from the guides group throughout the day for
-  // resharing in the nightly broadcast to client groups.
-  const guidesGroupId = '34651886491-1578239130@g.us';
-  const guidePhotosCollector = createGuidePhotosCollector(
-    guidesGroupId,
-    config.settings.timezone,
-    (parts) => whatsapp.downloadMediaViaStore(parts),
-  );
-  whatsapp.onRawGroupMessage(guidePhotosCollector.onRawMessage);
-  // Also capture images from DMs (used for testing the photo flow without
-  // needing to send to the guides group).
-  whatsapp.onRawDmMedia(guidePhotosCollector.onDmImage);
+  // Guide photos are forwarded at nightly-job time (fetch from history +
+  // forward), not captured in real-time. See scheduler.ts forwardTodayGuidePhotos.
 
   const app: App = {
     db,
@@ -342,7 +331,7 @@ async function main(): Promise<void> {
     privateTourNotifyRunner,
     runPrivateTourSync,
     sessionMonitor,
-    guidePhotosCollector,
+    guidePhotosCollector: null,
     replyHandler: null,
     classifier: null,
     lastQrDataUrl: null,

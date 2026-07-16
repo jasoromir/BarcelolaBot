@@ -15,6 +15,38 @@ export interface ScheduledTasks {
 export function startScheduler(app: App): ScheduledTasks {
   const tz = app.config.settings.timezone;
 
+  // Guide photos: fetch today's images/videos from the guides group and
+  // forward them to the target group. Uses the native forwardMessage path
+  // (which works now that whatsapp-web.js has the _serialized fix).
+  const guidesGroupId = '34651886491-1578239130@g.us';
+  async function forwardTodayGuidePhotos(targetChatId: string): Promise<number> {
+    const messages = await app.whatsapp.getMessages(guidesGroupId, 500);
+    const nowLocal = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    const images = messages
+      .filter((m) => (m.type === 'image' || m.type === 'video') && m.hasMedia)
+      .filter((m) => {
+        const msgDate = new Date(m.timestamp * 1000).toLocaleDateString('en-CA', { timeZone: tz });
+        return msgDate === nowLocal;
+      })
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (images.length === 0) return 0;
+    let forwarded = 0;
+    for (const img of images) {
+      try {
+        await app.whatsapp.forwardMessage(img.id, targetChatId);
+        forwarded++;
+        if (forwarded < images.length) await new Promise((r) => setTimeout(r, 1500));
+      } catch (err) {
+        app.logger.warn({
+          source: 'jobs',
+          eventType: 'guide_photo_forward_failed',
+          message: `forward ${img.id} to ${targetChatId}: ${(err as Error).message}`,
+        });
+      }
+    }
+    return forwarded;
+  }
+
   const nightlyFn = async () => {
     await runNightlyJob({
       config: app.config,
@@ -24,12 +56,7 @@ export function startScheduler(app: App): ScheduledTasks {
       reminders: app.reminders,
       logger: app.logger,
       dataDir: process.env.DATA_DIR ?? './data',
-      forwardGuidePhotos: app.guidePhotosCollector
-        ? (targetChatId: string) => app.guidePhotosCollector!.forwardAllTo(
-            targetChatId,
-            (chatId, media, caption) => app.whatsapp.sendMediaToGroup(chatId, media, caption).then(() => {}),
-          )
-        : undefined,
+      forwardGuidePhotos: forwardTodayGuidePhotos,
       isPaused: () => app.controlState.isPaused(),
       dryRun: false,
     });

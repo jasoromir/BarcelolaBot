@@ -6,6 +6,20 @@ Read this before making any changes.
 
 WhatsApp automation bot for a Barcelona tour agency. Deployed on **Railway** (not local). Sends nightly/morning tour broadcasts to WhatsApp groups, booking confirmations + reminders to customers, and handles replies via an LLM classifier.
 
+## Temporary dependency pin (check periodically)
+
+**As of 2026-07-16**, whatsapp-web.js is pinned to a fork:
+`github:lindionez/whatsapp-web.js#feat/fix-_serialized-id-fallback`
+(upstream PR: https://github.com/wwebjs/whatsapp-web.js/pull/201832)
+
+**Why:** WhatsApp Web's July 2026 update renamed `id._serialized` → `id.$1`,
+breaking getChatById, downloadMedia, fetchMessages, and forward. The PR adds
+a `_normalizeId()` shim. Once merged upstream and released, switch back:
+```bash
+cd app && npm install whatsapp-web.js@latest
+```
+Then run `npm run typecheck && npm test` to verify nothing broke.
+
 ## Key facts
 
 - **Railway project:** `barcelola-whatsapp-bot` (prod URL: `https://barcelola-whatsapp-bot-production.up.railway.app`)

@@ -20,7 +20,7 @@ export function startScheduler(app: App): ScheduledTasks {
   // (which works now that whatsapp-web.js has the _serialized fix).
   const guidesGroupId = '34651886491-1578239130@g.us';
   async function forwardTodayGuidePhotos(targetChatId: string): Promise<number> {
-    const messages = await app.whatsapp.getMessages(guidesGroupId, 500);
+    const messages = await app.whatsapp.getMessages(guidesGroupId, 50);
     const nowLocal = new Date().toLocaleDateString('en-CA', { timeZone: tz });
     const images = messages
       .filter((m) => (m.type === 'image' || m.type === 'video') && m.hasMedia)

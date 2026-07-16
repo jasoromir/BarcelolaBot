@@ -9,9 +9,11 @@
  * - `msg.forward()` requires a valid message lookup (same broken path)
  * - Only the live message object at receive time has working decryption keys
  *
- * Supports two source modes:
- * - Group messages (production): via onRawGroupMessage hook
- * - DM images (testing): via onDmImage hook, filtered by phone number
+ * Two download strategies:
+ * 1. msg.downloadMedia() — the whatsapp-web.js wrapper (fast when it works)
+ * 2. downloadMediaViaStore() — raw page.evaluate fallback using WhatsApp Web's
+ *    internal WWebJS.downloadMedia() on the Msg store model (bypasses the
+ *    broken wrapper that throws "r" on LID-migrated sessions)
  */
 
 export interface CollectedPhoto {
@@ -20,6 +22,10 @@ export interface CollectedPhoto {
   data: string; // base64
   caption: string;
   source: string; // group id or phone E.164
+}
+
+export interface DownloadFallback {
+  (msgIdParts: { fromMe: boolean; remote: string; id: string }): Promise<{ data: string; mimetype: string } | null>;
 }
 
 export interface GuidePhotosCollector {
@@ -34,7 +40,11 @@ export interface GuidePhotosCollector {
   getCollected: () => ReadonlyArray<CollectedPhoto>;
 }
 
-export function createGuidePhotosCollector(sourceGroupId: string, tz: string): GuidePhotosCollector {
+export function createGuidePhotosCollector(
+  sourceGroupId: string,
+  tz: string,
+  downloadFallback?: DownloadFallback,
+): GuidePhotosCollector {
   let collected: CollectedPhoto[] = [];
   let lastDateStr = todayStr(tz);
 
@@ -56,22 +66,22 @@ export function createGuidePhotosCollector(sourceGroupId: string, tz: string): G
     const type = typeof msg.type === 'string' ? msg.type : '';
     const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : Math.floor(Date.now() / 1000);
     const caption = typeof msg.body === 'string' ? msg.body : '';
-    const id = msg?.id?._serialized ?? '(unknown)';
+    const rawId = msg?.id;
+    const idStr = rawId?._serialized || rawId?.$1 || rawId?.id || '(unknown)';
 
     console.log(
-      `[guide-photos] capturing: id=${id} type=${type} hasMedia=${msg?.hasMedia} source=${source}`,
+      `[guide-photos] capturing: id=${idStr} type=${type} hasMedia=${msg?.hasMedia} source=${source}`,
     );
 
-    // Download immediately — the message is live now but won't be accessible
-    // later via getMessageById on this LID-migrated session.
-    const downloadPromise: Promise<any> = Promise.race([
+    // Strategy 1: try the whatsapp-web.js wrapper's downloadMedia()
+    const wrapperDownload: Promise<any> = Promise.race([
       msg.downloadMedia(),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('downloadMedia timeout 30s')), 30_000),
       ),
     ]);
 
-    downloadPromise
+    wrapperDownload
       .then((media: any) => {
         if (media && media.data) {
           collected.push({
@@ -82,16 +92,50 @@ export function createGuidePhotosCollector(sourceGroupId: string, tz: string): G
             source,
           });
           console.log(
-            `[guide-photos] ✓ captured ${type} (${Math.round(media.data.length / 1024)}KB) total=${collected.length}`,
+            `[guide-photos] ✓ captured via wrapper ${type} (${Math.round(media.data.length / 1024)}KB) total=${collected.length}`,
           );
         } else {
-          console.warn(`[guide-photos] ✗ downloadMedia returned null for ${type} id=${id}`);
+          throw new Error('downloadMedia returned null');
         }
       })
-      .catch((err: any) => {
-        console.error(
-          `[guide-photos] ✗ downloadMedia failed for ${type} id=${id}: ${err?.message ?? err}`,
+      .catch((wrapperErr: any) => {
+        console.warn(
+          `[guide-photos] wrapper downloadMedia failed: ${wrapperErr?.message ?? wrapperErr} — trying Store fallback`,
         );
+        // Strategy 2: use the raw Store-level download via page.evaluate
+        if (!downloadFallback || !rawId) {
+          console.error(`[guide-photos] ✗ no fallback available for ${idStr}`);
+          return;
+        }
+        const parts = {
+          fromMe: Boolean(rawId.fromMe),
+          remote: rawId.remote || '',
+          id: rawId.id || '',
+        };
+        if (!parts.remote || !parts.id) {
+          console.error(`[guide-photos] ✗ cannot build id parts: ${JSON.stringify(rawId)}`);
+          return;
+        }
+        downloadFallback(parts)
+          .then((media) => {
+            if (media && media.data) {
+              collected.push({
+                timestamp,
+                mimetype: media.mimetype || (type === 'video' ? 'video/mp4' : 'image/jpeg'),
+                data: media.data,
+                caption,
+                source,
+              });
+              console.log(
+                `[guide-photos] ✓ captured via Store fallback ${type} (${Math.round(media.data.length / 1024)}KB) total=${collected.length}`,
+              );
+            } else {
+              console.error(`[guide-photos] ✗ Store fallback returned null for ${idStr}`);
+            }
+          })
+          .catch((err: any) => {
+            console.error(`[guide-photos] ✗ Store fallback failed for ${idStr}: ${err?.message ?? err}`);
+          });
       });
   }
 

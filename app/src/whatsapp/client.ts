@@ -1032,6 +1032,75 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     return result as { data: string; mimetype: string };
   }
 
+  /**
+   * Download media from a message using WhatsApp Web's internal download path
+   * via pupPage.evaluate. This bypasses the whatsapp-web.js wrapper's
+   * downloadMedia() which throws "r" on LID-migrated sessions.
+   *
+   * Takes the raw msg.id components (fromMe, remote, id) to look up the message
+   * in the internal Msg store, then calls WWebJS.downloadMedia on it.
+   */
+  async function downloadMediaViaStore(msgIdParts: {
+    fromMe: boolean;
+    remote: string;
+    id: string;
+  }): Promise<{ data: string; mimetype: string } | null> {
+    const page = client.pupPage;
+    if (!page) return null;
+
+    const result = await page.evaluate(async (parts: { fromMe: boolean; remote: string; id: string }) => {
+      const w = globalThis as any;
+      const ns = w.WWebJS;
+      const store = w.Store;
+      if (!ns || !store?.Msg) return { error: 'no Store/WWebJS' };
+
+      // Build the message key the same way WhatsApp Web does internally.
+      // Try multiple lookup strategies since the Msg store keying is opaque.
+      let msg: any = null;
+
+      // Strategy 1: direct get by the composite key string ($1 field format)
+      const compositeKey = `${parts.fromMe}_${parts.remote}_${parts.id}`;
+      msg = store.Msg.get(compositeKey);
+
+      // Strategy 2: look up by the inner _serialized format
+      if (!msg) {
+        const serialized = `false_${parts.remote}_${parts.id}`;
+        msg = store.Msg.get(serialized);
+      }
+
+      // Strategy 3: scan recent messages in the chat for matching msg id
+      if (!msg) {
+        try {
+          const chat = await ns.getChat(parts.remote, { getAsModel: false });
+          if (chat?.msgs) {
+            const models = chat.msgs.getModelsArray ? chat.msgs.getModelsArray() : [];
+            msg = models.find((m: any) => m.id?.id === parts.id);
+          }
+        } catch { /* best effort */ }
+      }
+
+      if (!msg) return { error: `msg not found (key=${compositeKey})` };
+
+      try {
+        const blob = await ns.downloadMedia(msg);
+        if (!blob) return { error: 'downloadMedia returned null' };
+        const ab = await blob.arrayBuffer();
+        const bytes = new Uint8Array(ab);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]!);
+        return { data: w.btoa(binary), mimetype: blob.type || 'application/octet-stream' };
+      } catch (e: any) {
+        return { error: `download failed: ${e?.message || String(e)}` };
+      }
+    }, msgIdParts);
+
+    if (!result || (result as any).error) {
+      console.error(`[wa:downloadMediaViaStore] failed:`, (result as any)?.error);
+      return null;
+    }
+    return result as { data: string; mimetype: string };
+  }
+
   async function sendStickerFromDataUrl(toChatId: string, dataUrl: string) {
     // data:image/webp;base64,AAAA...
     const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
@@ -1084,6 +1153,7 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     onGroupJoin: (h: GroupJoinHandler) => groupJoinHandlers.push(h),
     sendStickerFromDataUrl,
     downloadStickerBytes,
+    downloadMediaViaStore,
     debugLinkPreview,
     async sendMediaToGroup(chatId: string, media: { mimetype: string; data: string }, caption?: string): Promise<SendResult> {
       const MessageMedia = (pkg as any).MessageMedia;

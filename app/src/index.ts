@@ -296,7 +296,11 @@ async function main(): Promise<void> {
   // Collect guide photos from the guides group throughout the day for
   // resharing in the nightly broadcast to client groups.
   const guidesGroupId = '34651886491-1578239130@g.us';
-  const guidePhotosCollector = createGuidePhotosCollector(guidesGroupId, config.settings.timezone);
+  const guidePhotosCollector = createGuidePhotosCollector(
+    guidesGroupId,
+    config.settings.timezone,
+    (parts) => whatsapp.downloadMediaViaStore(parts),
+  );
   whatsapp.onRawGroupMessage(guidePhotosCollector.onRawMessage);
   // Also capture images from DMs (used for testing the photo flow without
   // needing to send to the guides group).

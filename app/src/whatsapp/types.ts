@@ -118,6 +118,7 @@ export interface WhatsAppClient {
 
   sendStickerFromDataUrl(toChatId: string, dataUrl: string): Promise<SendResult>;
   downloadStickerBytes(messageId: string): Promise<{ data: string; mimetype: string } | null>;
+  downloadMediaViaStore(msgIdParts: { fromMe: boolean; remote: string; id: string }): Promise<{ data: string; mimetype: string } | null>;
   debugLinkPreview(url: string): Promise<unknown>;
   sendMediaToGroup(chatId: string, media: { mimetype: string; data: string }, caption?: string): Promise<SendResult>;
   pupPageEval(fn: (...args: any[]) => any, ...args: any[]): Promise<any>;

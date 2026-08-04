@@ -22,6 +22,17 @@ export interface DirectMessageSenderOpts {
   isNewContactRestricted?: () => boolean;
   /** Has this phone ever had a DM confirmed delivered? Used with isNewContactRestricted. */
   hasConfirmedDelivery?: (phone: string) => boolean;
+  /**
+   * Delay between each queued send during drainPending (default 8s). This is
+   * a bulk catch-up sweep, not a live send — firing several DMs back-to-back
+   * the moment a session reconnects is the exact burst pattern suspected of
+   * triggering the 2026-07-20 instant-logout ban (a fresh reconnect drained
+   * one queued DM within ~15s of coming online, then WhatsApp logged the
+   * session out again seconds later). A gap between items, on top of the
+   * humanized per-message typing delay already in sendDirect, keeps sends
+   * looking sequential/human rather than an automated burst.
+   */
+  drainInterItemDelayMs?: number;
 }
 
 export interface SendInput {
@@ -83,7 +94,12 @@ export class DirectMessageSender {
   async drainPending(): Promise<{ sent: number; failed: number; abandoned: number }> {
     const stats = { sent: 0, failed: 0, abandoned: 0 };
     const items = this.opts.pendingDms.pending();
-    for (const item of items) {
+    const delayMs = this.opts.drainInterItemDelayMs ?? 8_000;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      if (i > 0 && delayMs > 0) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
       try {
         // Single attempt, no backoff — this is a bulk catch-up sweep over a
         // (possibly multi-day) backlog, not a live send. Using the full

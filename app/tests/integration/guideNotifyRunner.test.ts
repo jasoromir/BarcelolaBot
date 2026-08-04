@@ -109,6 +109,52 @@ describe('guideNotifyRunner.tick', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('a tick already in flight blocks an overlapping tick from double-sending (regression: 2026-07-22 duplicate roster to guide אדיר)', async () => {
+    // store.record() only marks the roster handled AFTER the send resolves —
+    // simulate a slow send (e.g. the humanized typing delay + shared send
+    // queue) so a second tick() call, fired before the first resolves, would
+    // have seen wasHandled()===false and sent again without the guard.
+    let resolveSend: (() => void) | null = null;
+    const sent: Sent[] = [];
+    const wa: Partial<WhatsAppClient> = {
+      sendDirect: async (phone, body) => {
+        await new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        });
+        sent.push({ kind: 'direct', to: phone, body });
+        return { messageId: `dm-${sent.length}` };
+      },
+      sendToGroup: async () => ({ messageId: 'g' }),
+    };
+    const wix: Partial<WixClient> = { getGuideRostersForDate: async () => [rosterInWindow] };
+    const db = openDatabase(tmpDbPath());
+    const store = new GuideNotificationsStore(db);
+    const runner = createGuideNotifyRunner({
+      wa: wa as WhatsAppClient,
+      wix: wix as WixClient,
+      store,
+      logger: noopLogger,
+      config: () => ({
+        guides: { guides: [{ name: 'ליאנה', phone: '+34651886491', active: true }] },
+        tours: { tours: {} },
+      }),
+      settings: { minutesBefore: 15, pollIntervalSeconds: 60, testMode: false },
+      timezone: 'Europe/Madrid',
+      isPaused: () => false,
+      isConnected: () => true,
+      now: () => new Date('2026-07-02T14:50:00.000Z'),
+    });
+
+    const firstTick = runner.tick();
+    // Second tick fires while the first send is still awaiting resolveSend.
+    const secondStats = await runner.tick();
+    expect(secondStats).toEqual({ due: 0, sent: 0, skipped: 0, failed: 0 });
+    resolveSend!();
+    const firstStats = await firstTick;
+    expect(firstStats.sent).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
   it('skips (and records) a tour whose guide has no phone on file', async () => {
     const roster = { ...rosterInWindow, guideName: 'נעמי' };
     const { runner, sent, store } = makeDeps([roster]);

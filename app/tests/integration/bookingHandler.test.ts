@@ -235,6 +235,97 @@ describe('handleBookingWebhook', () => {
     expect(arg.body).toBe(sentBody);
   });
 
+  it('forwards the welcome message to the guide instead of the client when new_client_messages_enabled is false', async () => {
+    const { dedup, pending, logger } = freshInfra();
+    const client = fakeClient();
+    const sender = new DirectMessageSender({
+      client, pendingDms: pending,
+      allowlist: () => fakeConfig('open').allowlist,
+      retry: { attempts: 1, backoffMs: [] },
+    });
+    const cfg = fakeConfig('open');
+    cfg.settings.reminders.new_client_messages_enabled = false;
+    const result = await handleBookingWebhook({
+      payload: fixture,
+      config: cfg,
+      dedup,
+      sender,
+      wa: client,
+      logger,
+      isPaused: () => false,
+      forwardToGuidePhone: () => '+34623964800',
+    });
+    expect(result.outcome).toBe('forwarded_to_guide');
+    // Never sent to the actual client phone.
+    expect(client.sendDirect).toHaveBeenCalledTimes(2);
+    const calls = (client.sendDirect as any).mock.calls;
+    expect(calls[0][0]).toBe('+34623964800');
+    expect(calls[1][0]).toBe('+34623964800');
+    // Second DM is the raw, unmixed client-facing message body.
+    expect(calls[1][1]).toContain(fixture.data.booking.formInfo.contactDetails.firstName);
+  });
+
+  it('still queues a reminders row when forwarding to the guide, so the day-before reminder is not silently lost', async () => {
+    const { dedup, pending, reminders, logger } = freshInfra();
+    const client = fakeClient();
+    const sender = new DirectMessageSender({
+      client, pendingDms: pending,
+      allowlist: () => fakeConfig('open').allowlist,
+      retry: { attempts: 1, backoffMs: [] },
+    });
+    const cfg = fakeConfig('open');
+    cfg.settings.reminders.enabled = true;
+    cfg.settings.reminders.new_client_messages_enabled = false;
+    const result = await handleBookingWebhook({
+      payload: fixture,
+      config: cfg,
+      dedup,
+      sender,
+      wa: client,
+      logger,
+      isPaused: () => false,
+      reminders,
+      forwardToGuidePhone: () => '+34623964800',
+    });
+    expect(result.outcome).toBe('forwarded_to_guide');
+    const row = reminders.get(fixture.data.booking.id);
+    expect(row).not.toBeNull();
+    // Fixture's tour date is far in the past relative to "now", so the
+    // reminder-send-time computation folds it into "combined" (awaiting_reply)
+    // rather than a standalone future send (awaiting_send) — either way, the
+    // key assertion is that a row exists at all.
+    expect(['awaiting_send', 'awaiting_reply']).toContain(row!.status);
+    expect(row!.phone).toBe(fixture.data.booking.formInfo.contactDetails.phone);
+    // Not marked as a failed delivery — we never attempted the client send at
+    // all, so the reminder runner's "skip if welcome undelivered" guard must
+    // not trigger for this row.
+    expect(row!.welcomeDelivered).toBeNull();
+  });
+
+  it('does not forward anywhere (and does not touch the client) when new_client_messages_enabled is false and no guide phone resolves', async () => {
+    const { dedup, pending, logger } = freshInfra();
+    const client = fakeClient();
+    const sender = new DirectMessageSender({
+      client, pendingDms: pending,
+      allowlist: () => fakeConfig('open').allowlist,
+      retry: { attempts: 1, backoffMs: [] },
+    });
+    const cfg = fakeConfig('open');
+    cfg.settings.reminders.new_client_messages_enabled = false;
+    const result = await handleBookingWebhook({
+      payload: fixture,
+      config: cfg,
+      dedup,
+      sender,
+      wa: client,
+      logger,
+      isPaused: () => false,
+      forwardToGuidePhone: () => null,
+    });
+    expect(result.outcome).toBe('forwarded_to_guide');
+    expect(client.sendDirect).not.toHaveBeenCalled();
+  });
+
   it('dedups across webhook formats (order_id claimed along with booking_id)', async () => {
     const { dedup, pending, logger } = freshInfra();
     const client = fakeClient();

@@ -69,6 +69,14 @@ function dayBeforeKey(r: GuideTourRoster): string {
 export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotifyRunner {
   let handle: NodeJS.Timeout | null = null;
   const now = () => (deps.now ?? (() => new Date()))();
+  // Re-entrancy guard: a roster/day-before send only gets marked handled
+  // (store.record) AFTER it completes, and each send now goes through the
+  // bot's single global send queue with a humanized typing delay — easily
+  // longer than the 60s poll interval. Without this guard, a slow tick is
+  // still in flight when the next one starts, both see "not yet handled",
+  // and both send — seen live 2026-07-22 as a duplicated day-before reminder
+  // to guide אדיר. Mirrors the same fix already applied to reminders/runner.ts.
+  let tickInFlight = false;
 
   // Send the pre-tour checklist poll right after the roster message. The short
   // note goes first (a poll message can't carry body text), then the poll
@@ -105,8 +113,17 @@ export function createGuideNotifyRunner(deps: GuideNotifyRunnerDeps): GuideNotif
 
   async function tick() {
     const stats = { due: 0, sent: 0, skipped: 0, failed: 0 };
+    if (tickInFlight) return stats;
     if (deps.isPaused() || !deps.isConnected()) return stats;
+    tickInFlight = true;
+    try {
+      return await runTick(stats);
+    } finally {
+      tickInFlight = false;
+    }
+  }
 
+  async function runTick(stats: { due: number; sent: number; skipped: number; failed: number }) {
     const cfg = deps.config();
     const nowMs = now().getTime();
     const windowMs = deps.settings.minutesBefore * 60 * 1000;

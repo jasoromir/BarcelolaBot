@@ -418,15 +418,43 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     try {
       // whatsapp-web.js emits every reaction update, including removals (reaction === '').
       const emoji: string = typeof reaction?.reaction === 'string' ? reaction.reaction : '';
-      const targetMessageId: string = reaction?.msgId?._serialized ?? '';
-      const chatId: string = reaction?.msgId?.remote?._serialized ?? reaction?.msgId?.remote ?? '';
+      // WhatsApp Web's July 2026 rename of `_serialized` → `$1` is shimmed by the
+      // pinned fork for Message/Chat/Contact, but the raw reaction payload's
+      // nested key objects are not Base structures — read both spellings here.
+      const serializedOf = (id: any): string =>
+        (typeof id?._serialized === 'string' && id._serialized) ||
+        (typeof id?.$1 === 'string' && id.$1) ||
+        (typeof id === 'string' ? id : '');
+      const targetMessageId: string = serializedOf(reaction?.msgId);
+      const chatId: string = serializedOf(reaction?.msgId?.remote);
+      // `senderUserJid` is built by the injected hook from reaction.author ?? .from.
+      const senderId: string =
+        (typeof reaction?.senderId === 'string' && reaction.senderId) ||
+        serializedOf(reaction?.senderId) ||
+        '';
+      // Reactions we added ourselves (e.g. an ack emoji the bot posts) must never
+      // be treated as a customer answer.
+      const fromMe = Boolean(reaction?.id?.fromMe ?? reaction?.msgKey?.fromMe);
+      // Whether the message being reacted to is one of ours. Undefined when the
+      // key doesn't carry it — handlers treat that as "unknown", not "no".
+      const rawTargetFromMe = reaction?.msgId?.fromMe;
+      const targetFromMe =
+        typeof rawTargetFromMe === 'boolean' ? rawTargetFromMe : undefined;
       const ts: number =
         typeof reaction?.timestamp === 'number' ? reaction.timestamp : Math.floor(Date.now() / 1000);
       console.log(
-        `[wa:message_reaction] target=${targetMessageId} emoji=${JSON.stringify(emoji)} chat=${chatId}`,
+        `[wa:message_reaction] target=${targetMessageId} emoji=${JSON.stringify(emoji)} chat=${chatId} sender=${senderId} fromMe=${fromMe} targetFromMe=${targetFromMe}`,
       );
       if (!emoji || !targetMessageId) return;
-      const ev = { targetMessageId, reaction: emoji, chatId, timestamp: ts };
+      const ev = {
+        targetMessageId,
+        reaction: emoji,
+        chatId,
+        timestamp: ts,
+        senderId,
+        fromMe,
+        targetFromMe,
+      };
       for (const h of reactionHandlers) {
         Promise.resolve(h(ev)).catch((err) => {
           console.error('[wa:reactionHandler] error', err);
@@ -476,7 +504,17 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     }, url);
   }
 
+  // Routed through the same one-at-a-time queue as sendDirect (see
+  // enqueueSendDirect below) — a group ping and a customer DM firing at the
+  // same moment is exactly the concurrent-automated-sends pattern suspected
+  // of contributing to WhatsApp's anti-spam restrictions (2026-07-07 and
+  // 2026-07-20 incidents). Every outbound message this bot sends, group or
+  // DM, now goes out strictly one at a time, globally.
   async function sendToGroup(groupId: string, body: string, opts?: { linkPreview?: LinkPreviewData }): Promise<SendResult> {
+    return enqueueSendDirect(() => sendToGroupImpl(groupId, body, opts));
+  }
+
+  async function sendToGroupImpl(groupId: string, body: string, opts?: { linkPreview?: LinkPreviewData }): Promise<SendResult> {
     if (opts?.linkPreview) {
       // Bypass the broken WAWebLinkPreviewChatAction by injecting pre-fetched
       // preview data directly. We disable the library's auto-preview and pass
@@ -531,15 +569,18 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     }
   }
 
-  // Every 1:1 DM in the app — whether triggered by a webhook, the reminder
-  // poller, the guide-notify poller, or an admin route — funnels through this
-  // single queue so at most one send is ever in flight at a time, regardless
-  // of which caller triggered it. WhatsApp flagged this account for suspected
-  // bulk/automated messaging (linked-device "new chat" restriction, seen
-  // 2026-07-07); sending several DMs in parallel is exactly the pattern that
-  // triggers that kind of anti-spam detection. `sendDirectQueue` chains onto
-  // itself so a slow/failed send never blocks forever — the chain always
-  // advances even if the previous send throws.
+  // Every outbound message this bot sends — 1:1 DM or group post, whether
+  // triggered by a webhook, the reminder poller, the guide-notify poller, a
+  // delivery ping, or an admin route — funnels through this single queue so
+  // at most one send is ever in flight at a time, regardless of which caller
+  // triggered it. WhatsApp flagged this account for suspected bulk/automated
+  // messaging (linked-device "new chat" restriction, seen 2026-07-07, and a
+  // full instant-logout ban seen 2026-07-20 right after a DM + group ping +
+  // guide-alert DMs landed within seconds of each other); sending several
+  // messages in parallel is exactly the pattern that triggers that kind of
+  // anti-spam detection. `sendDirectQueue` chains onto itself so a slow/failed
+  // send never blocks forever — the chain always advances even if the
+  // previous send throws.
   let sendDirectQueue: Promise<unknown> = Promise.resolve();
   function enqueueSendDirect<T>(task: () => Promise<T>): Promise<T> {
     const result = sendDirectQueue.then(task, task);
@@ -729,16 +770,18 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     });
   }
 
-  /** Send a native WhatsApp poll to a group chat. */
+  /** Send a native WhatsApp poll to a group chat. Queued like sendToGroup. */
   async function sendPollToGroup(
     groupId: string,
     question: string,
     options: string[],
     allowMultipleAnswers = true,
   ): Promise<SendResult> {
-    const poll = new Poll(question, options, { allowMultipleAnswers, messageSecret: undefined });
-    const msg = await client.sendMessage(groupId, poll);
-    return { messageId: (msg as any)?.id?._serialized ?? '' };
+    return enqueueSendDirect(async () => {
+      const poll = new Poll(question, options, { allowMultipleAnswers, messageSecret: undefined });
+      const msg = await client.sendMessage(groupId, poll);
+      return { messageId: (msg as any)?.id?._serialized ?? '' };
+    });
   }
 
   async function isGroupAdmin(groupId: string): Promise<boolean> {
@@ -867,44 +910,50 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
       }));
   }
 
+  // Queued like sendToGroup/sendDirect — forwarding a guide photo is still an
+  // outbound send and must not overlap with a concurrent DM/group message.
   async function forwardMessage(messageId: string, toChatId: string) {
-    const msg = await client.getMessageById(messageId);
-    await msg.forward(toChatId);
-    return { messageId: messageId };
+    return enqueueSendDirect(async () => {
+      const msg = await client.getMessageById(messageId);
+      await msg.forward(toChatId);
+      return { messageId: messageId };
+    });
   }
 
   async function sendSticker(toChatId: string, messageId: string) {
-    const msg: any = await client.getMessageById(messageId);
-    if (!msg) {
-      throw new Error(`sendSticker: message not found id=${messageId}`);
-    }
-    console.log(
-      `[wa:sendSticker] src id=${messageId} type=${msg.type} hasMedia=${msg.hasMedia} from=${msg.from} to=${toChatId}`,
-    );
-    if (!msg.hasMedia) {
-      throw new Error(
-        `sendSticker: source message has no media (type=${msg.type}, id=${messageId})`,
+    return enqueueSendDirect(async () => {
+      const msg: any = await client.getMessageById(messageId);
+      if (!msg) {
+        throw new Error(`sendSticker: message not found id=${messageId}`);
+      }
+      console.log(
+        `[wa:sendSticker] src id=${messageId} type=${msg.type} hasMedia=${msg.hasMedia} from=${msg.from} to=${toChatId}`,
       );
-    }
-    console.log(`[wa:sendSticker] calling downloadMedia...`);
-    const downloadTimeoutMs = 30_000;
-    const media: any = await Promise.race([
-      msg.downloadMedia(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`downloadMedia timeout after ${downloadTimeoutMs}ms`)), downloadTimeoutMs),
-      ),
-    ]);
-    if (!media) {
-      throw new Error(`sendSticker: downloadMedia returned null for ${messageId}`);
-    }
-    const dataLen = typeof media.data === 'string' ? media.data.length : 0;
-    console.log(
-      `[wa:sendSticker] downloaded mimetype=${media.mimetype} filename=${media.filename} dataLen=${dataLen}`,
-    );
-    const sent: any = await client.sendMessage(toChatId, media, {
-      sendMediaAsSticker: true,
+      if (!msg.hasMedia) {
+        throw new Error(
+          `sendSticker: source message has no media (type=${msg.type}, id=${messageId})`,
+        );
+      }
+      console.log(`[wa:sendSticker] calling downloadMedia...`);
+      const downloadTimeoutMs = 30_000;
+      const media: any = await Promise.race([
+        msg.downloadMedia(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`downloadMedia timeout after ${downloadTimeoutMs}ms`)), downloadTimeoutMs),
+        ),
+      ]);
+      if (!media) {
+        throw new Error(`sendSticker: downloadMedia returned null for ${messageId}`);
+      }
+      const dataLen = typeof media.data === 'string' ? media.data.length : 0;
+      console.log(
+        `[wa:sendSticker] downloaded mimetype=${media.mimetype} filename=${media.filename} dataLen=${dataLen}`,
+      );
+      const sent: any = await client.sendMessage(toChatId, media, {
+        sendMediaAsSticker: true,
+      });
+      return { messageId: sent?.id?._serialized ?? messageId };
     });
-    return { messageId: sent?.id?._serialized ?? messageId };
   }
 
   async function downloadStickerBytes(messageId: string): Promise<{ data: string; mimetype: string } | null> {
@@ -1030,15 +1079,17 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
   }
 
   async function sendStickerFromDataUrl(toChatId: string, dataUrl: string) {
-    // data:image/webp;base64,AAAA...
-    const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-    if (!match) throw new Error('sendStickerFromDataUrl: invalid data URL');
-    const mimetype = match[1]!;
-    const data = match[2]!;
-    const MessageMedia = (pkg as any).MessageMedia;
-    const media = new MessageMedia(mimetype, data, 'sticker.webp');
-    const sent: any = await client.sendMessage(toChatId, media, { sendMediaAsSticker: true });
-    return { messageId: sent?.id?._serialized ?? '' };
+    return enqueueSendDirect(async () => {
+      // data:image/webp;base64,AAAA...
+      const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+      if (!match) throw new Error('sendStickerFromDataUrl: invalid data URL');
+      const mimetype = match[1]!;
+      const data = match[2]!;
+      const MessageMedia = (pkg as any).MessageMedia;
+      const media = new MessageMedia(mimetype, data, 'sticker.webp');
+      const sent: any = await client.sendMessage(toChatId, media, { sendMediaAsSticker: true });
+      return { messageId: sent?.id?._serialized ?? '' };
+    });
   }
 
   return {
@@ -1083,11 +1134,13 @@ export function createWhatsAppClient(opts: WhatsAppClientOpts): WhatsAppClient {
     downloadStickerBytes,
     downloadMediaViaStore,
     debugLinkPreview,
-    async sendMediaToGroup(chatId: string, media: { mimetype: string; data: string }, caption?: string): Promise<SendResult> {
-      const MessageMedia = (pkg as any).MessageMedia;
-      const mm = new MessageMedia(media.mimetype, media.data, 'photo.jpg');
-      const msg: any = await client.sendMessage(chatId, mm, { caption: caption || undefined });
-      return { messageId: msg?.id?._serialized ?? '' };
+    sendMediaToGroup(chatId: string, media: { mimetype: string; data: string }, caption?: string): Promise<SendResult> {
+      return enqueueSendDirect(async () => {
+        const MessageMedia = (pkg as any).MessageMedia;
+        const mm = new MessageMedia(media.mimetype, media.data, 'photo.jpg');
+        const msg: any = await client.sendMessage(chatId, mm, { caption: caption || undefined });
+        return { messageId: msg?.id?._serialized ?? '' };
+      });
     },
     pupPageEval: (fn: (...args: any[]) => any, ...args: any[]) => client.pupPage!.evaluate(fn, ...args),
   };

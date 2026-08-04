@@ -122,4 +122,73 @@ describe('reminderRunner.tick', () => {
     const arg = confirmAndAnnounce.mock.calls[0][0];
     expect(arg.body).toBe(sent[0]!.body);
   });
+
+  it('forwards the reminder to the guide instead of the client when isNewClientMessagingEnabled is false', async () => {
+    const { runner, sent, reminders } = makeRunner({
+      isNewClientMessagingEnabled: () => false,
+      forwardToGuidePhone: () => '+34623964800',
+    });
+    reminders.upsert(dueBooking);
+    const stats = await runner.tick();
+    expect(stats.sent).toBe(0); // not sent to the client
+    expect(sent).toHaveLength(2); // header + body, both to the guide
+    expect(sent[0]!.phone).toBe('+34623964800');
+    expect(sent[1]!.phone).toBe('+34623964800');
+    expect(sent[1]!.body).toContain('Dana');
+    // Still marked handled so it isn't retried every tick.
+    const row = reminders.get('b1');
+    expect(row?.sentAtIso).not.toBeNull();
+  });
+
+  it('does not touch the client (and sends nothing) when isNewClientMessagingEnabled is false and no guide phone resolves', async () => {
+    const { runner, sent, reminders } = makeRunner({
+      isNewClientMessagingEnabled: () => false,
+      forwardToGuidePhone: () => null,
+    });
+    reminders.upsert(dueBooking);
+    const stats = await runner.tick();
+    expect(stats.sent).toBe(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('waits between consecutive due reminders in the same tick (no burst), but not before the first one', async () => {
+    const { runner, sent, reminders } = makeRunner({
+      settings: {
+        pollIntervalSeconds: 30,
+        officialContactNumber: '+34623964800',
+        workerGroupId: '120@g.us',
+        interMessageDelayMinMs: 50,
+        interMessageDelayMaxMs: 60,
+      },
+    });
+    reminders.upsert({ ...dueBooking, bookingId: 'b1', phone: '+972500000001' });
+    reminders.upsert({ ...dueBooking, bookingId: 'b2', phone: '+972500000002' });
+    reminders.upsert({ ...dueBooking, bookingId: 'b3', phone: '+972500000003' });
+    const start = Date.now();
+    const stats = await runner.tick();
+    const elapsed = Date.now() - start;
+    expect(stats.sent).toBe(3);
+    expect(sent).toHaveLength(3);
+    // Two gaps (between item 1-2 and 2-3), each at least the configured min.
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+  });
+
+  it('does not delay before sending when only one reminder is due', async () => {
+    const { runner, sent, reminders } = makeRunner({
+      settings: {
+        pollIntervalSeconds: 30,
+        officialContactNumber: '+34623964800',
+        workerGroupId: '120@g.us',
+        interMessageDelayMinMs: 5_000,
+        interMessageDelayMaxMs: 6_000,
+      },
+    });
+    reminders.upsert(dueBooking);
+    const start = Date.now();
+    const stats = await runner.tick();
+    const elapsed = Date.now() - start;
+    expect(stats.sent).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(elapsed).toBeLessThan(1_000);
+  });
 });

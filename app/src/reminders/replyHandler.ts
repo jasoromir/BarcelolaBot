@@ -6,15 +6,14 @@ import type { WixClient } from '../wix/types.js';
 import type { TemplatesConfig, ToursConfig } from '../config/schemas.js';
 import type { Classifier, ClassificationResult } from './classifier.js';
 import type { Drafter } from './drafter.js';
-import {
-  buildConfirmationAck,
-  buildCancelAck,
-  buildWorkerForward,
-  buildCancelNotice,
-} from './templates.js';
+import { buildWorkerForward } from './templates.js';
+import { applyCancel, applyConfirm, type BookingResponseDeps } from './bookingResponse.js';
 import { normalizePhone } from '../messaging/phoneNormalizer.js';
 
-export interface ReplyHandlerDeps {
+/** Extends BookingResponseDeps so `deps` can be handed straight to
+ *  applyConfirm / applyCancel — the shared confirm/cancel core in
+ *  reminders/bookingResponse.ts, also used by the reaction handler. */
+export interface ReplyHandlerDeps extends BookingResponseDeps {
   wa: WhatsAppClient;
   wix: WixClient;
   reminders: RemindersStore;
@@ -30,6 +29,8 @@ export interface ReplyHandlerDeps {
     defaultGoogleMapsUrl?: string;
     /** Quiet window after each DM before we classify. 0 = fire immediately. */
     debounceSeconds?: number;
+    /** Manager DMed on every confirm/cancel. Undefined disables the notification. */
+    clientResponseNotifyPhone?: string;
   };
   /** Getter, not a static snapshot — so a config reload is picked up on the
    *  next incoming DM instead of staying frozen at whatever was loaded at startup. */
@@ -312,58 +313,13 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       return;
     }
 
-    // Push the count change to Wix so the guide's calendar reflects reality.
-    // We sync on every count change (first confirm or subsequent update).
-    let wixUpdateNote: string | null = null;
-    if (countChanged) {
-      try {
-        const upd = await deps.wix.updateNumberOfParticipants({
-          bookingId: reminder.bookingId,
-          totalParticipants: newCount,
-        });
-        if (!upd.ok) {
-          wixUpdateNote = `wix_update_failed: ${upd.error ?? 'unknown'}`;
-          deps.logger.error({
-            source: 'reply',
-            eventType: 'wix_update_participants_failed',
-            message: wixUpdateNote,
-            metadata: { bookingId: reminder.bookingId },
-          });
-        } else {
-          deps.logger.info({
-            source: 'reply',
-            eventType: 'wix_update_participants',
-            message: `wix count -> ${newCount}${upd.unchanged ? ' (unchanged)' : ''}`,
-            metadata: { bookingId: reminder.bookingId },
-          });
-        }
-      } catch (err) {
-        wixUpdateNote = `wix_update_failed: ${(err as Error).message}`;
-        deps.logger.error({
-          source: 'reply',
-          eventType: 'wix_update_participants_failed',
-          message: wixUpdateNote,
-          metadata: { bookingId: reminder.bookingId },
-        });
-      }
-    }
-
-    deps.reminders.setStatus(reminder.bookingId, 'confirmed', {
-      participantCount: newCount,
-      lastReplyTs: nowIso,
+    const { wixUpdateNote } = await applyConfirm(deps, {
+      reminder,
+      newCount,
+      via: 'text',
+      rawText: dm.body,
+      nowIso,
     });
-    // Shorter "updated" ack when the customer is changing a count they
-    // already confirmed. First confirm always gets the full ack with
-    // meeting point + map.
-    const ack = buildConfirmationAck({
-      reminder: { ...reminder, participantCount: newCount },
-      templates: deps.config().templates,
-      tours: deps.config().tours,
-      officialContactNumber: deps.settings.officialContactNumber,
-      defaultGoogleMapsUrl: deps.settings.defaultGoogleMapsUrl,
-      isUpdate: wasAlreadyConfirmed,
-    });
-    await safeSend(deps, reminder.phone, ack, wasAlreadyConfirmed ? 'confirmation_update_ack' : 'confirmation_ack');
 
     // If the customer also asked a question alongside their confirmation,
     // forward to the worker group so it doesn't get silently dropped.
@@ -391,11 +347,8 @@ export function createReplyHandler(deps: ReplyHandlerDeps) {
       forwarded: hasQuestion,
       notes: wixUpdateNote ?? (hasQuestion ? 'confirm_with_question' : null) ?? (wasAlreadyConfirmed ? 'count_changed' : null),
     });
-    deps.logger.info({
-      source: 'reply',
-      eventType: wasAlreadyConfirmed ? 'booking_count_updated' : 'booking_confirmed',
-      message: `${wasAlreadyConfirmed ? 'updated' : 'confirmed'} ${reminder.bookingId} count=${newCount}`,
-    });
+    // The booking_confirmed / booking_count_updated log line is emitted by
+    // applyConfirm, so every channel logs it identically.
   }
 
   // Public entry point. When debounceMs>0 we buffer per-phone and flush after
@@ -416,43 +369,7 @@ async function handleCancel(
   dm: IncomingDm,
   nowIso: string,
 ): Promise<void> {
-  const reason = `Customer cancelled via WhatsApp at ${nowIso}. Their message: ${dm.body}`;
-  let wixResult;
-  try {
-    wixResult = await deps.wix.cancelBooking({ bookingId: reminder.bookingId, reason });
-  } catch (err) {
-    wixResult = { ok: false, error: (err as Error).message };
-  }
-  deps.reminders.setStatus(reminder.bookingId, 'cancelled', { lastReplyTs: nowIso });
-
-  const ack = buildCancelAck({
-    reminder,
-    templates: deps.config().templates,
-    officialContactNumber: deps.settings.officialContactNumber,
-  });
-  await safeSend(deps, reminder.phone, ack, 'cancel_ack');
-
-  // Notify worker group with the dedicated cancel-notice template so it
-  // doesn't read as an unrelated off-topic forward.
-  const wixStatus = wixResult.ok
-    ? wixResult.alreadyCancelled
-      ? 'כבר בוטל קודם'
-      : 'בוטל בהצלחה ✅'
-    : `נכשל — ${wixResult.error ?? 'unknown'}`;
-  const notice = buildCancelNotice({
-    reminder,
-    templates: deps.config().templates,
-    customerMessage: dm.body,
-    wixStatus,
-  });
-  await safeSendGroup(deps, deps.settings.workerGroupId, notice, 'cancel_notice');
-
-  deps.logger.info({
-    source: 'reply',
-    eventType: 'booking_cancelled',
-    message: `cancelled ${reminder.bookingId} wix=${wixResult.ok}`,
-    metadata: { wixError: wixResult.error },
-  });
+  await applyCancel(deps, { reminder, via: 'text', rawText: dm.body, nowIso });
 }
 
 // Forward a non-text customer message (voice note / image / video / etc.) to the
@@ -598,19 +515,3 @@ async function safeSend(
   }
 }
 
-async function safeSendGroup(
-  deps: ReplyHandlerDeps,
-  groupId: string,
-  body: string,
-  kind: string,
-): Promise<void> {
-  try {
-    await deps.wa.sendToGroup(groupId, body);
-  } catch (err) {
-    deps.logger.error({
-      source: 'reply',
-      eventType: 'worker_notify_failed',
-      message: `${kind}: ${(err as Error).message}`,
-    });
-  }
-}

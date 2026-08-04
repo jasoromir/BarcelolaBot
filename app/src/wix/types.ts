@@ -1,6 +1,6 @@
-import type { Tour, BookingEvent, GuideTourRoster } from '../types.js';
+import type { Tour, BookingEvent, BookingSummary, GuideTourRoster } from '../types.js';
 
-export type { Tour, BookingEvent, GuideTourRoster };
+export type { Tour, BookingEvent, BookingSummary, GuideTourRoster };
 
 export interface CancelBookingInput {
   bookingId: string;
@@ -52,6 +52,14 @@ export interface WixClient {
    * extended-bookings v2 API so the guide resource is available.
    */
   getGuideRostersForDate(date: string): Promise<GuideTourRoster[]>;
+  /**
+   * All confirmed bookings whose tour starts within [fromIso, toIso), across
+   * however many days that spans — a single continuous cursor walk over the
+   * bookings API rather than one getToursForDate call per day. Used by the
+   * reminder backfill sweep to check weeks ahead in one pass instead of
+   * hundreds of per-day calls.
+   */
+  getConfirmedBookingsInRange(fromIso: string, toIso: string): Promise<BookingSummary[]>;
   cancelBooking(input: CancelBookingInput): Promise<CancelBookingResult>;
   updateNumberOfParticipants(
     input: UpdateParticipantsInput,

@@ -27,6 +27,7 @@ import { createGeminiDrafter } from './reminders/drafter.js';
 import { createReplyHandler } from './reminders/replyHandler.js';
 import { createReactionHandler } from './reminders/reactionHandler.js';
 import { createReminderRunner } from './reminders/runner.js';
+import { createReminderBackfillRunner } from './jobs/reminderBackfillRunner.js';
 import { createLogger } from './log/logger.js';
 import { createWhatsAppClient } from './whatsapp/client.js';
 import { createWixClient } from './wix/client.js';
@@ -37,8 +38,12 @@ import { createHttpServer } from './http/server.js';
 import { startScheduler } from './scheduler.js';
 import { createEmailer } from './notify/emailer.js';
 import { createSessionMonitor } from './notify/sessionMonitor.js';
+import { createBrowserProbe } from './notify/browserProbe.js';
+import { createJobAlerter } from './notify/jobAlerts.js';
 import type { App } from './app.js';
 import type { SessionMonitor } from './notify/sessionMonitor.js';
+import type { BrowserProbe } from './notify/browserProbe.js';
+import type { JobAlerter } from './notify/jobAlerts.js';
 
 function requireEnv(name: string, fallback?: string): string {
   const v = process.env[name];
@@ -114,6 +119,26 @@ async function main(): Promise<void> {
     baseUrl: process.env.WIX_BASE_URL || undefined,
   });
 
+  // Wait this long after reconnecting before ANY poller (reminders, guide
+  // roster, private-tour notify, reminder backfill) is allowed to send.
+  // Firing automated messages the instant a fresh session comes up — no
+  // warm-up, no gap — is the exact burst pattern suspected of triggering the
+  // 2026-07-20 instant-logout ban: a reconnect drained a queued DM within
+  // ~15s of coming online, then WhatsApp killed the session again seconds
+  // later. isConnectedAndStable() is the single gate all pollers check
+  // instead of raw whatsapp.state(), so a poller can never act in the first
+  // minute after any reconnect, however it happened (QR scan, auto-reconnect,
+  // restart with a persisted session).
+  const RECONNECT_STABLE_COOLDOWN_MS = 60_000;
+  let connectedSinceMs: number | null = null;
+  whatsapp.onStateChange((s) => {
+    connectedSinceMs = s.kind === 'connected' ? Date.now() : null;
+  });
+  const isConnectedAndStable = (): boolean =>
+    whatsapp.state().kind === 'connected' &&
+    connectedSinceMs !== null &&
+    Date.now() - connectedSinceMs >= RECONNECT_STABLE_COOLDOWN_MS;
+
   const dmSender = new DirectMessageSender({
     client: whatsapp,
     pendingDms,
@@ -152,11 +177,32 @@ async function main(): Promise<void> {
       officialContactNumber: config.settings.reminders.official_contact_number,
       workerGroupId: config.settings.reminders.worker_group_id,
       defaultGoogleMapsUrl: config.settings.reminders.default_google_maps_url,
+      interMessageDelayMinMs: config.settings.reminders.inter_message_delay_min_ms,
+      interMessageDelayMaxMs: config.settings.reminders.inter_message_delay_max_ms,
     },
     isPaused: () => controlState.isPaused(),
-    isConnected: () => whatsapp.state().kind === 'connected',
+    isConnected: isConnectedAndStable,
+    isNewClientMessagingEnabled: () => config.settings.reminders.new_client_messages_enabled !== false,
+    forwardToGuidePhone: () => resolveGuidePhone(config.guides, 'ליאנה'),
     notifyDelivery,
   });
+
+  const backfillCfg = config.settings.reminders.backfill;
+  const reminderBackfillRunner = backfillCfg?.enabled
+    ? createReminderBackfillRunner({
+        wix,
+        reminders,
+        logger,
+        settings: {
+          pollIntervalSeconds: backfillCfg.poll_interval_seconds,
+          reminderSendTime: config.settings.reminders.reminder_send_time,
+          leadTimeHours: config.settings.reminders.lead_time_hours,
+          timezone: config.settings.timezone,
+          wideSweepDaysAhead: backfillCfg.wide_sweep_days_ahead,
+        },
+        isPaused: () => controlState.isPaused(),
+      })
+    : null;
 
   // Guide pre-tour roster notifications: poll for tours entering the send
   // window and DM the assigned guide their attendee list. Null when disabled.
@@ -193,7 +239,7 @@ async function main(): Promise<void> {
           },
           timezone: config.settings.timezone,
           isPaused: () => controlState.isPaused(),
-          isConnected: () => whatsapp.state().kind === 'connected',
+          isConnected: isConnectedAndStable,
         })
       : null;
 
@@ -254,7 +300,7 @@ async function main(): Promise<void> {
           },
           timezone: config.settings.timezone,
           isPaused: () => controlState.isPaused(),
-          isConnected: () => whatsapp.state().kind === 'connected',
+          isConnected: isConnectedAndStable,
         })
       : null;
 
@@ -262,6 +308,8 @@ async function main(): Promise<void> {
   // proactively before the session ages out. Email (not WhatsApp) is the channel
   // precisely because WhatsApp is what goes down.
   let sessionMonitor: SessionMonitor | null = null;
+  let browserProbe: BrowserProbe | null = null;
+  let jobAlerter: JobAlerter | null = null;
   const notif = config.settings.notifications;
   if (notif?.enabled) {
     const emailer = createEmailer({
@@ -290,6 +338,28 @@ async function main(): Promise<void> {
           : undefined,
       },
     });
+
+    const adminUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : undefined;
+
+    // A wedged Chromium renderer keeps state() at "connected" while every send
+    // times out — invisible to sessionMonitor. Evaluate a trivial expression in
+    // the page; if that can't finish, nothing can be sent.
+    browserProbe = createBrowserProbe({
+      probe: () => whatsapp.pupPageEval(() => 1),
+      isConnected: () => whatsapp.state().kind === 'connected',
+      emailer,
+      store: controlStateStore,
+      logger,
+      settings: {
+        timeoutMs: notif.browser_probe_timeout_ms ?? 30_000,
+        failuresBeforeAlert: notif.browser_probe_failures_before_alert ?? 2,
+        adminUrl,
+      },
+    });
+
+    jobAlerter = createJobAlerter({ emailer, logger, adminUrl });
   }
 
   // Guide photos are forwarded at nightly-job time (fetch from history +
@@ -327,10 +397,13 @@ async function main(): Promise<void> {
     notifyDelivery,
     logger,
     reminderRunner,
+    reminderBackfillRunner,
     guideNotifyRunner,
     privateTourNotifyRunner,
     runPrivateTourSync,
     sessionMonitor,
+    browserProbe,
+    jobAlerter,
     guidePhotosCollector: null,
     replyHandler: null,
     classifier: null,
@@ -354,12 +427,29 @@ async function main(): Promise<void> {
       classifier,
       drafter,
       logger,
+      // Getters, not captured values: handlers are built once at startup, but
+      // `config` is reassigned by reloadConfig(). A plain literal here freezes
+      // whatever the overlay held at boot — which is exactly how
+      // client_response_notify_phone stayed undefined after being hot-added.
       settings: {
-        officialContactNumber: config.settings.reminders.official_contact_number,
-        workerGroupId: config.settings.reminders.worker_group_id,
-        confidenceThreshold: config.settings.reminders.classifier_confidence_threshold,
-        defaultGoogleMapsUrl: config.settings.reminders.default_google_maps_url,
-        debounceSeconds: config.settings.reminders.reply_debounce_seconds,
+        get officialContactNumber() {
+          return config.settings.reminders.official_contact_number;
+        },
+        get workerGroupId() {
+          return config.settings.reminders.worker_group_id;
+        },
+        get confidenceThreshold() {
+          return config.settings.reminders.classifier_confidence_threshold;
+        },
+        get defaultGoogleMapsUrl() {
+          return config.settings.reminders.default_google_maps_url;
+        },
+        get debounceSeconds() {
+          return config.settings.reminders.reply_debounce_seconds;
+        },
+        get clientResponseNotifyPhone() {
+          return config.settings.reminders.client_response_notify_phone;
+        },
       },
       config: () => ({ templates: config.templates, tours: config.tours }),
     });
@@ -367,11 +457,31 @@ async function main(): Promise<void> {
     app.replyHandler = replyHandler;
     app.classifier = classifier;
 
+    // Handles both staff 👍 on a worker-group draft AND customers answering the
+    // day-before reminder with a reaction instead of a text reply.
     const reactionHandler = createReactionHandler({
       wa: whatsapp,
+      wix,
+      reminders,
+      audit: replyAudit,
       workerForwards,
       logger,
-      settings: { workerGroupId: config.settings.reminders.worker_group_id },
+      // Getters for the same reason as the reply handler above — see comment there.
+      settings: {
+        get workerGroupId() {
+          return config.settings.reminders.worker_group_id;
+        },
+        get officialContactNumber() {
+          return config.settings.reminders.official_contact_number;
+        },
+        get defaultGoogleMapsUrl() {
+          return config.settings.reminders.default_google_maps_url;
+        },
+        get clientResponseNotifyPhone() {
+          return config.settings.reminders.client_response_notify_phone;
+        },
+      },
+      config: () => ({ templates: config.templates, tours: config.tours }),
     });
     whatsapp.onReaction(reactionHandler);
     reminderRunner.start();
@@ -422,6 +532,27 @@ async function main(): Promise<void> {
     });
   }
 
+  if (reminderBackfillRunner) {
+    reminderBackfillRunner.start();
+    logger.info({
+      source: 'startup',
+      eventType: 'reminder_backfill_enabled',
+      message: `reminder backfill sweep enabled (every ${backfillCfg!.poll_interval_seconds}s, covers today+tomorrow)`,
+    });
+    // Wide (weeks-ahead) sweep runs once here at boot — i.e. on every deploy
+    // and restart — rather than on a timer, so it catches any booking made
+    // further out than the tight sweep's today+tomorrow window without
+    // adding recurring Wix API load. Fire-and-forget: startup shouldn't wait
+    // on a potentially large Wix query.
+    reminderBackfillRunner.runWideSweep().catch((err) =>
+      logger.error({
+        source: 'startup',
+        eventType: 'reminder_backfill_wide_sweep_failed',
+        message: (err as Error).message,
+      }),
+    );
+  }
+
   if (privateTourNotifyRunner) {
     privateTourNotifyRunner.start();
     logger.info({
@@ -431,17 +562,38 @@ async function main(): Promise<void> {
     });
   }
 
-  whatsapp.onStateChange(async (s) => {
+  // Wait this long after reconnecting before draining any queued DMs. Firing
+  // automated sends the instant a fresh session comes up — no warm-up, no
+  // gap — is the exact burst pattern suspected of triggering the 2026-07-20
+  // instant-logout ban: a reconnect drained a queued DM within ~15s of
+  // coming online, then WhatsApp killed the session again seconds later.
+  // Re-checks connection state after the wait so a reconnect that immediately
+  // drops again doesn't still fire a stale drain.
+  const RECONNECT_DRAIN_COOLDOWN_MS = 60_000;
+  whatsapp.onStateChange((s) => {
     if (s.kind === 'connected') {
       controlStateStore.set('last_connect_state', 'connected');
-      const r = await dmSender.drainPending();
-      if (r.sent + r.failed + r.abandoned > 0) {
-        logger.info({
-          source: 'pending',
-          eventType: 'pending_dms_drained',
-          message: `drain: sent=${r.sent} failed=${r.failed} abandoned=${r.abandoned}`,
-        });
-      }
+      setTimeout(() => {
+        if (whatsapp.state().kind !== 'connected') return;
+        dmSender
+          .drainPending()
+          .then((r) => {
+            if (r.sent + r.failed + r.abandoned > 0) {
+              logger.info({
+                source: 'pending',
+                eventType: 'pending_dms_drained',
+                message: `drain: sent=${r.sent} failed=${r.failed} abandoned=${r.abandoned}`,
+              });
+            }
+          })
+          .catch((err) =>
+            logger.error({
+              source: 'pending',
+              eventType: 'pending_dms_drain_failed',
+              message: (err as Error).message,
+            }),
+          );
+      }, RECONNECT_DRAIN_COOLDOWN_MS);
     } else if (s.kind === 'disconnected') {
       controlStateStore.set('last_connect_state', 'disconnected');
     }

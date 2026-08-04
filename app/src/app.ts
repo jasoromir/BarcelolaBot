@@ -18,12 +18,15 @@ import type { GuideNotificationsStore } from './persistence/guideNotifications.j
 import type { PrivateTourEventsStore } from './persistence/privateTourEvents.js';
 import type { PrivateTourNotificationsStore } from './persistence/privateTourNotifications.js';
 import type { ReminderRunner } from './reminders/runner.js';
+import type { ReminderBackfillRunner } from './jobs/reminderBackfillRunner.js';
 import type { GuideNotifyRunner } from './jobs/guideNotifyRunner.js';
 import type { PrivateTourNotifyRunner } from './jobs/privateTourNotifyRunner.js';
 import type { JobOutcome } from './types.js';
 import type { Classifier } from './reminders/classifier.js';
 import type { IncomingDm } from './whatsapp/types.js';
 import type { SessionMonitor } from './notify/sessionMonitor.js';
+import type { BrowserProbe } from './notify/browserProbe.js';
+import type { JobAlerter } from './notify/jobAlerts.js';
 import type { GuidePhotosCollector } from './jobs/guidePhotosCollector.js';
 export type { GuidePhotosCollector };
 
@@ -54,6 +57,9 @@ export interface App {
   notifyDelivery: DeliveryNotifier;
   logger: AppLogger;
   reminderRunner: ReminderRunner;
+  /** Backfills a missing reminder row for any today/tomorrow booking that was never queued
+   *  (e.g. booked while new_client_messages_enabled was off). Null if disabled. */
+  reminderBackfillRunner: ReminderBackfillRunner | null;
   /** Sends each guide their attendee roster shortly before tour start. Null if disabled. */
   guideNotifyRunner: GuideNotifyRunner | null;
   /** Day-before reminder for private (calendar-sourced) tour bookings. Null if disabled. */
@@ -62,6 +68,10 @@ export interface App {
   runPrivateTourSync: (() => Promise<JobOutcome>) | null;
   /** Watches the WhatsApp link and emails out-of-band alerts. Null if notifications disabled. */
   sessionMonitor: SessionMonitor | null;
+  /** Detects a wedged Chromium page, which state() reports as 'connected'. */
+  browserProbe: BrowserProbe | null;
+  /** Emails when a broadcast job runs but delivers to zero groups. */
+  jobAlerter: JobAlerter | null;
   /** Collects guide photos throughout the day for resharing in the nightly broadcast. */
   guidePhotosCollector: GuidePhotosCollector | null;
   /** Exposed so admin /simulate-reply can inject synthetic DMs. Null if reminders disabled. */

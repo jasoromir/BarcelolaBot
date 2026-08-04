@@ -22,6 +22,19 @@ export interface Tour {
   }>;
 }
 
+/** One confirmed booking, independent of session/tour aggregation — used by
+ *  the wide-range reminder backfill sweep, which only needs per-booking data
+ *  (not the per-session rollup that Tour provides). */
+export interface BookingSummary {
+  bookingId: string;
+  tourId: string; // serviceId
+  tourTitle?: string;
+  startAtIso: ISODateTime;
+  clientName: string;
+  phone: string; // as received from Wix (not yet normalized)
+  participantCount: number;
+}
+
 export interface BookingEvent {
   bookingId: string;
   /** eCommerce order ID — different from bookingId; used for payment info lookups. */

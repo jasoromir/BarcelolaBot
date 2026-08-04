@@ -2,10 +2,13 @@ import type { WebhookDedup } from '../persistence/webhookDedup.js';
 import type { AppLogger } from '../log/logger.js';
 import type { AppConfig } from '../config/loader.js';
 import type { DirectMessageSender } from '../messaging/directMessage.js';
+import type { WhatsAppClient } from '../whatsapp/types.js';
 import type { RemindersStore } from '../persistence/reminders.js';
 import { parseBookingWebhook } from '../wix/webhookVerifier.js';
 import { buildBookingConfirmation } from '../messaging/builder.js';
 import { normalizePhone } from '../messaging/phoneNormalizer.js';
+import { computeReminderSendAtMs } from '../reminders/schedule.js';
+import { sendGuideForward } from '../messaging/guideForward.js';
 
 export type HandlerOutcome =
   | { outcome: 'sent' }
@@ -13,6 +16,7 @@ export type HandlerOutcome =
   | { outcome: 'invalid'; error: string }
   | { outcome: 'skipped_allowlist' }
   | { outcome: 'skipped_paused' }
+  | { outcome: 'forwarded_to_guide' }
   | { outcome: 'deferred' }
   | { outcome: 'failed'; error: string };
 
@@ -21,6 +25,7 @@ export interface HandleInput {
   config: AppConfig;
   dedup: WebhookDedup;
   sender: DirectMessageSender;
+  wa: WhatsAppClient;
   logger: AppLogger;
   isPaused: () => boolean;
   reminders?: RemindersStore;
@@ -34,6 +39,14 @@ export interface HandleInput {
       body?: string;
     }): Promise<{ status: string }>;
   };
+  /**
+   * Getter resolving the guide who should be DMed the client's message
+   * instead of the client directly, while new_client_messages_enabled is
+   * off — e.g. ליאנה, per operator request during the 2026-07-20/24
+   * "restricted for 4 more days" WhatsApp linked-device lockout. Returns
+   * null to skip forwarding (e.g. guide not found in guides.yaml).
+   */
+  forwardToGuidePhone?: () => string | null;
 }
 
 export async function handleBookingWebhook(input: HandleInput): Promise<HandlerOutcome> {
@@ -101,49 +114,12 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
   const startAtMs = new Date(event.startAtIso).getTime();
   const tz = input.config.settings.timezone;
 
-  // Compute when the reminder should fire: 10:00 AM (reminder_send_time) on
-  // the calendar day before the tour, in the configured timezone. Falls back
-  // to tourStart - lead_time_hours if reminder_send_time is not set.
-  function reminderSendAtMs(): number {
-    const sendTime = remindersCfg.reminder_send_time;
-    if (!sendTime) return startAtMs - remindersCfg.lead_time_hours * 3_600_000;
-    // Get the tour date (YYYY-MM-DD) in the local timezone.
-    const tourDateStr = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date(startAtMs));
-    const [tourY, tourM, tourD] = tourDateStr.split('-').map(Number);
-    // Day before = subtract 1 from the day (Intl handles month rollover for us
-    // by constructing from a Date).
-    const dayBefore = new Date(Date.UTC(tourY!, tourM! - 1, tourD! - 1, 12, 0, 0));
-    const dayBeforeStr = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(dayBefore);
-    // Build "YYYY-MM-DDTHH:MM:00" in local time, then parse as UTC offset via
-    // Intl so we get the correct absolute instant regardless of DST.
-    const [hh, mm] = sendTime.split(':').map(Number);
-    // Find the UTC instant that corresponds to sendTime on dayBeforeStr in tz.
-    // Strategy: try candidate UTC offsets by bisecting on what the local time
-    // would be at that instant. Simpler: use Date with a known-offset approach.
-    // We approximate by formatting a probe instant and adjusting.
-    const probeLocal = new Date(`${dayBeforeStr}T${sendTime}:00`); // naive local (wrong tz)
-    // Adjust for the difference between the probe's local interpretation and tz.
-    const fmtProbe = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: false,
-    }).formatToParts(probeLocal);
-    const pDate = fmtProbe.find((p) => p.type === 'year')?.value + '-' +
-      fmtProbe.find((p) => p.type === 'month')?.value + '-' +
-      fmtProbe.find((p) => p.type === 'day')?.value;
-    const pHH = Number(fmtProbe.find((p) => p.type === 'hour')?.value ?? 0);
-    const pMM = Number(fmtProbe.find((p) => p.type === 'minute')?.value ?? 0);
-    const diffMs =
-      (pDate === dayBeforeStr ? 0 : pDate < dayBeforeStr ? 86400000 : -86400000) +
-      ((pHH - hh!) * 60 + (pMM - mm!)) * 60000;
-    return probeLocal.getTime() - diffMs;
-  }
-
-  const sendAtMs = reminderSendAtMs();
+  const sendAtMs = computeReminderSendAtMs({
+    startAtMs,
+    reminderSendTime: remindersCfg.reminder_send_time,
+    leadTimeHours: remindersCfg.lead_time_hours,
+    timezone: tz,
+  });
   // "combined" = the booking arrived after the reminder would already have fired,
   // so we fold the reminder ask into the confirmation DM right now.
   const combined = remindersCfg.enabled && now >= sendAtMs;
@@ -156,6 +132,69 @@ export async function handleBookingWebhook(input: HandleInput): Promise<HandlerO
     officialContactNumber: remindersCfg.official_contact_number,
     defaultGoogleMapsUrl: remindersCfg.default_google_maps_url,
   });
+
+  if (remindersCfg.new_client_messages_enabled === false) {
+    const guidePhone = input.forwardToGuidePhone?.();
+    if (guidePhone) {
+      const header =
+        `⚠️ שליחה אוטומטית לקוחות מושבתת כרגע — הודעת קבלה ל${event.clientName} (${phone}) לא נשלחה אליו/ה. ` +
+        `אנא שלחי לו/ה ידנית:`;
+      try {
+        await sendGuideForward(input.wa, guidePhone, header, body);
+      } catch (err) {
+        input.logger.error({
+          source: 'webhook',
+          eventType: 'guide_forward_failed',
+          message: (err as Error).message,
+          metadata: { bookingId: event.bookingId },
+        });
+      }
+    }
+    // Still queue a reminders row (even though the welcome itself was
+    // forwarded to the guide, not sent) so the day-before reminder isn't
+    // silently skipped — reminders/runner.ts checks the SAME flag at send
+    // time and will forward it to the guide too if messaging is still off
+    // then, or send it to the client normally if re-enabled by then. Without
+    // this, the only thing that could ever backfill a reminder for a booking
+    // made while messaging was off is the periodic Wix sweep, which only
+    // looks a day or two ahead — a booking for a tour weeks out would get no
+    // row at all until then.
+    if (reminders && remindersCfg.enabled) {
+      const sendAtIso = combined
+        ? null
+        : testDelaySeconds > 0
+          ? new Date(now + testDelaySeconds * 1000).toISOString()
+          : new Date(sendAtMs).toISOString();
+      reminders.upsert({
+        bookingId: event.bookingId,
+        orderIdEcom: event.orderIdEcom ?? null,
+        phone,
+        clientName: event.clientName,
+        tourId: event.tourId || null,
+        tourNameHe: event.tourTitle ?? null,
+        startAtIso: event.startAtIso,
+        participantCount: event.participantCount ?? 1,
+        status: combined ? 'awaiting_reply' : 'awaiting_send',
+        sendAtIso,
+        sentAtIso: combined ? new Date().toISOString() : null,
+        lastReplyTs: null,
+        // Left null (not false) — the reminder runner's "skip if welcome
+        // never delivered" guard is for a genuine delivery failure to a
+        // client we actually tried to reach; here we deliberately never
+        // tried, so the day-before reminder should still fire (forwarded to
+        // the guide, same as the welcome was).
+        welcomeDelivered: null,
+      });
+    }
+    input.dedup.complete(event.bookingId, 'skipped_paused');
+    input.logger.warn({
+      source: 'webhook',
+      eventType: 'booking_forwarded_to_guide',
+      message: `new_client_messages_enabled=false; forwarded welcome for ${event.bookingId} to guide instead of ${phone}`,
+      metadata: { bookingId: event.bookingId, phone, forwardedToGuide: Boolean(guidePhone) },
+    });
+    return { outcome: 'forwarded_to_guide' };
+  }
 
   const r = await input.sender.send({ phone, body, bookingId: event.bookingId });
   switch (r.outcome) {

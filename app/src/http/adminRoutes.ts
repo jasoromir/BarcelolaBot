@@ -161,6 +161,27 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     res.json({ ok: true, result });
   });
 
+  exp.post('/admin/api/reminders/backfill-now', async (_req, res) => {
+    if (!app.reminderBackfillRunner) {
+      res.status(400).json({ error: 'reminders.backfill not enabled' });
+      return;
+    }
+    const result = await app.reminderBackfillRunner.tick();
+    res.json({ ok: true, result });
+  });
+
+  // Wide (weeks-ahead) reminder backfill sweep — runs automatically once at
+  // every startup/deploy, but also callable here to re-run on demand (e.g.
+  // right after re-enabling new_client_messages_enabled) without a restart.
+  exp.post('/admin/api/reminders/backfill-wide-sweep-now', async (_req, res) => {
+    if (!app.reminderBackfillRunner) {
+      res.status(400).json({ error: 'reminders.backfill not enabled' });
+      return;
+    }
+    const result = await app.reminderBackfillRunner.runWideSweep();
+    res.json({ ok: true, result });
+  });
+
   exp.get('/admin/api/private-tours', (req, res) => {
     const limit = Math.min(Number((req.query.limit as string) ?? 50), 200);
     const rows = app.db
@@ -956,7 +977,6 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     }
   });
 
-
   exp.get('/admin/api/debug/link-preview', async (req, res) => {
     const url = (req.query.url as string) || 'https://www.barcelola-tours.com/barcelolatours';
     try {
@@ -965,6 +985,27 @@ export function registerAdminRoutes(exp: Express, app: App, cfg: AdminConfig): v
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
+  });
+
+  // Manually run one sessionMonitor tick and report the resulting
+  // control_state — lets an operator confirm the disconnect-alert email path
+  // is actually reachable without waiting for the next 15-min cron cycle, and
+  // reset() below recovers from a stuck flag (e.g. the 2026-07-18/19 bug
+  // where a stale wa_disconnect_alert_sent from a past outage silently
+  // blocked every subsequent outage's alert — fixed by wiring
+  // sessionMonitor.tick() into every health-check tick, not just the
+  // disconnected branch; see scheduler.ts).
+  exp.get('/admin/api/debug/session-monitor-state', (_req, res) => {
+    const keys = ['wa_connected_since_ms', 'wa_down_since_ms', 'wa_disconnect_alert_sent', 'wa_proactive_alert_sent'];
+    const state: Record<string, string | null> = {};
+    for (const k of keys) state[k] = app.controlStateStore.get(k);
+    res.json({ waState: app.whatsapp.state().kind, sessionMonitorEnabled: Boolean(app.sessionMonitor), controlState: state });
+  });
+  exp.post('/admin/api/debug/session-monitor-reset', (_req, res) => {
+    for (const k of ['wa_connected_since_ms', 'wa_down_since_ms', 'wa_disconnect_alert_sent', 'wa_proactive_alert_sent']) {
+      app.controlStateStore.set(k, '');
+    }
+    res.json({ ok: true });
   });
 
   // Re-send a specific sticker into a target chat (default: back to BARCELOLA

@@ -40,6 +40,16 @@ export interface ReactionEvent {
   /** The chat/group the reacted-to message lives in. */
   chatId: string;
   timestamp: number;
+  /** Serialized id of whoever added the reaction (@c.us or @lid), '' if unresolvable. */
+  senderId: string;
+  /** True when WE added the reaction — never act on our own. */
+  fromMe: boolean;
+  /**
+   * Whether the reacted-to message was sent by us. undefined when the message
+   * key didn't carry the flag; callers should treat undefined as "unknown" and
+   * not reject on it.
+   */
+  targetFromMe?: boolean;
 }
 
 export type ReactionHandler = (ev: ReactionEvent) => void | Promise<void>;

@@ -1,4 +1,4 @@
-import type { Tour, GuideTourRoster, RosterAttendee } from '../types.js';
+import type { Tour, BookingSummary, GuideTourRoster, RosterAttendee } from '../types.js';
 import type {
   CancelBookingInput,
   CancelBookingResult,
@@ -329,6 +329,43 @@ export function createWixClient(opts: WixClientOpts): WixClient {
       return [...perSession.values()]
         .filter((t) => t.date === date)
         .sort((a, b) => a.startTime.localeCompare(b.startTime));
+    },
+
+    async getConfirmedBookingsInRange(fromIso: string, toIso: string): Promise<BookingSummary[]> {
+      const toMs = new Date(toIso).getTime();
+      const results: BookingSummary[] = [];
+      let cursor: string | undefined;
+      const maxPages = 200; // generous cap for a multi-week range in 100-row pages
+      for (let page = 0; page < maxPages; page++) {
+        const data = await queryPage(cursor, fromIso);
+        const entries = data.bookingsEntries ?? [];
+        let passedEnd = false;
+        for (const e of entries) {
+          const b = e.booking;
+          if (!b) continue;
+          if (b.status && b.status !== 'CONFIRMED' && b.status !== 'APPROVED') continue;
+          const s = b.bookedEntity?.singleSession;
+          if (!s?.start) continue;
+          const startMs = new Date(s.start).getTime();
+          if (startMs >= toMs) {
+            passedEnd = true;
+            break;
+          }
+          results.push({
+            bookingId: b.id,
+            tourId: b.bookedEntity?.serviceId ?? 'unknown',
+            tourTitle: b.bookedEntity?.title,
+            startAtIso: new Date(s.start).toISOString(),
+            clientName: asName(b.formInfo?.contactDetails),
+            phone: b.formInfo?.contactDetails?.phone ?? '',
+            participantCount: participantCount(b),
+          });
+        }
+        if (passedEnd) break;
+        cursor = data.pagingMetadata?.cursors?.next;
+        if (!cursor) break;
+      }
+      return results;
     },
 
     async getGuideRostersForDate(date: string): Promise<GuideTourRoster[]> {

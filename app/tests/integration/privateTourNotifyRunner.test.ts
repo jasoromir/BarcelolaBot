@@ -165,6 +165,50 @@ describe('privateTourNotifyRunner.tick', () => {
     expect(sent).toHaveLength(2); // unchanged from the first tick
   });
 
+  it('a tick already in flight blocks an overlapping tick from double-sending (regression: 2026-07-22 duplicate private-tour reminder to guide אדיר)', async () => {
+    // notifyStore.record() only marks the event handled AFTER all its sends
+    // resolve — simulate a slow send (e.g. the humanized typing delay + shared
+    // send queue) so a second tick() call, fired before the first resolves,
+    // would have seen wasHandled()===false and sent again without the guard.
+    let resolveSend: (() => void) | null = null;
+    const sent: Sent[] = [];
+    const wa: Partial<WhatsAppClient> = {
+      sendDirect: async (phone, body) => {
+        await new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        });
+        sent.push({ kind: 'direct', to: phone, body });
+        return { messageId: `dm-${sent.length}` };
+      },
+      sendToGroup: async () => ({ messageId: 'g' }),
+    };
+    const db = openDatabase(tmpDbPath());
+    const store = new PrivateTourEventsStore(db);
+    store.upsert(baseEvent({ guide: 'ליאנה' })); // single recipient keeps the test to one send
+    const notifyStore = new PrivateTourNotificationsStore(db);
+    const runner = createPrivateTourNotifyRunner({
+      wa: wa as WhatsAppClient,
+      store,
+      notifyStore,
+      logger: noopLogger,
+      config: () => ({ guides, templates, tours }),
+      settings: { sendTime: '18:30', pollIntervalSeconds: 60, testMode: false, managerGuideName: 'ליאנה' },
+      timezone: 'Europe/Madrid',
+      isPaused: () => false,
+      isConnected: () => true,
+      now: () => new Date('2026-07-14T18:00:00.000Z'),
+    });
+
+    const firstTick = runner.tick();
+    // Second tick fires while the first send is still awaiting resolveSend.
+    const secondStats = await runner.tick();
+    expect(secondStats).toEqual({ due: 0, sent: 0, skipped: 0, failed: 0 });
+    resolveSend!();
+    const firstStats = await firstTick;
+    expect(firstStats.sent).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
   it('records a skip (no send) when neither guide nor manager phone resolves', async () => {
     const { runner, sent, notifyStore } = makeDeps([baseEvent({ guide: 'לא קיים' })], {
       settings: {

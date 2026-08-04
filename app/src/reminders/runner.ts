@@ -4,6 +4,7 @@ import type { WhatsAppClient } from '../whatsapp/types.js';
 import type { WixClient } from '../wix/types.js';
 import type { TemplatesConfig, ToursConfig } from '../config/schemas.js';
 import { buildReminder24h } from './templates.js';
+import { sendGuideForward } from '../messaging/guideForward.js';
 
 export interface ReminderRunnerDeps {
   wa: WhatsAppClient;
@@ -19,9 +20,29 @@ export interface ReminderRunnerDeps {
     officialContactNumber: string;
     workerGroupId: string;
     defaultGoogleMapsUrl?: string;
+    /**
+     * Extra pause between consecutive due reminders in the same tick, on top
+     * of sendDirect's own scaled typing delay — a batch of several reminders
+     * firing back-to-back (only 4-30s apart) still reads as automated bulk
+     * messaging to WhatsApp's anti-spam detection. Randomized within
+     * [min, max] so identical-size batches don't take an identical total
+     * time. Defaults to a 10-20s gap.
+     */
+    interMessageDelayMinMs?: number;
+    interMessageDelayMaxMs?: number;
   };
   isPaused: () => boolean;
   isConnected: () => boolean;
+  /** Kill-switch for the day-before reminder DM, independent of isPaused —
+   *  e.g. while the WhatsApp account is flagged/recovering and we don't want
+   *  to send any more automated messages to customers. Defaults to enabled
+   *  (returns true) if not provided. */
+  isNewClientMessagingEnabled?: () => boolean;
+  /** Getter resolving the guide who should be DMed the reminder instead of
+   *  the client, while isNewClientMessagingEnabled is off — e.g. ליאנה, per
+   *  operator request during the 2026-07-20/24 WhatsApp linked-device
+   *  lockout. Returns null to skip forwarding (e.g. guide not in guides.yaml). */
+  forwardToGuidePhone?: () => string | null;
   /** Confirms delivery of the sent reminder and pings the worker group. Optional. */
   notifyDelivery?: {
     confirmAndAnnounce(input: {
@@ -55,7 +76,9 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
 
   async function sendOne(
     r: ReminderRow,
-  ): Promise<'sent' | 'deferred' | 'failed' | 'skipped_undelivered_welcome'> {
+  ): Promise<
+    'sent' | 'deferred' | 'failed' | 'skipped_undelivered_welcome' | 'forwarded_to_guide'
+  > {
     if (!deps.isConnected()) return 'deferred';
     if (deps.isPaused()) return 'deferred';
     // The original welcome/confirmation DM for this booking was confirmed NOT
@@ -101,6 +124,34 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
       defaultGoogleMapsUrl: deps.settings.defaultGoogleMapsUrl,
       depositLine,
     });
+
+    if (deps.isNewClientMessagingEnabled?.() === false) {
+      const guidePhone = deps.forwardToGuidePhone?.();
+      if (guidePhone) {
+        const header =
+          `⚠️ שליחה אוטומטית לקוחות מושבתת כרגע — תזכורת ל${r.clientName ?? r.phone} (${r.phone}) לא נשלחה אליו/ה. ` +
+          `אנא שלחי לו/ה ידנית:`;
+        try {
+          await sendGuideForward(deps.wa, guidePhone, header, body);
+        } catch (err) {
+          deps.logger.error({
+            source: 'reminder',
+            eventType: 'guide_forward_failed',
+            message: (err as Error).message,
+            metadata: { bookingId: r.bookingId },
+          });
+        }
+      }
+      deps.reminders.markSent(r.bookingId, new Date().toISOString());
+      deps.logger.info({
+        source: 'reminder',
+        eventType: 'reminder_forwarded_to_guide',
+        message: `new-client messaging disabled; forwarded 24h reminder for ${r.bookingId} to guide instead of ${r.phone}`,
+        metadata: { phone: r.phone, bookingId: r.bookingId, forwardedToGuide: Boolean(guidePhone) },
+      });
+      return 'forwarded_to_guide';
+    }
+
     try {
       const sendResult = await deps.wa.sendDirect(r.phone, body);
       deps.reminders.markSent(r.bookingId, new Date().toISOString());
@@ -149,8 +200,14 @@ export function createReminderRunner(deps: ReminderRunnerDeps): ReminderRunner {
       const due = deps.reminders.due(new Date().toISOString());
       let sent = 0;
       let deferred = 0;
-      for (const r of due) {
-        const result = await sendOne(r);
+      const minMs = deps.settings.interMessageDelayMinMs ?? 10_000;
+      const maxMs = deps.settings.interMessageDelayMaxMs ?? 20_000;
+      for (let i = 0; i < due.length; i++) {
+        if (i > 0 && maxMs > 0) {
+          const delayMs = minMs + Math.random() * Math.max(0, maxMs - minMs);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        const result = await sendOne(due[i]!);
         if (result === 'sent') sent++;
         else if (result === 'deferred') deferred++;
       }

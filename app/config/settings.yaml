@@ -13,6 +13,15 @@ retry:
   backoff_ms: [60000, 300000, 900000]
 reminders:
   enabled: true
+  # Kill-switch for the welcome/confirmation DM + its 24h reminder to new
+  # clients, independent of `enabled` above. RE-ENABLED 2026-07-29 after 5
+  # stable days (100% connected, zero disconnects) with the send-queue +
+  # inter-message-delay safety guards in place. While this is false, welcome +
+  # reminder messages are instead forwarded to ליאנה (see forwardToGuidePhone
+  # in index.ts / reminders/runner.ts + webhookRoutes.ts) so she can send them
+  # manually — flip back to false immediately if WhatsApp restricts the
+  # account again (ack=-1 on established contacts, or another logout/ban).
+  new_client_messages_enabled: true
   lead_time_hours: 24            # fallback if reminder_send_time not set
   reminder_send_time: "10:00"    # send reminder at 10:00 AM (Europe/Madrid) the day before the tour
   combine_threshold_hours: 24    # if tour starts within 24h of booking, combine confirmation+reminder
@@ -23,11 +32,33 @@ reminders:
   classifier_confidence_threshold: 0.7
   default_google_maps_url: "https://maps.app.goo.gl/3nbsJJytm6HnDGXL8"
   reply_debounce_seconds: 15
+  # Manager DMed on every customer confirm/cancel (text, emoji, or 👍 reaction).
+  # Comment out to disable these notifications.
+  client_response_notify_phone: "+34623964800"
+  # Extra randomized pause between consecutive due reminders fired in the same
+  # poll tick, on top of the per-message humanized typing delay — so a batch
+  # of several reminders doesn't read as automated bulk sending.
+  inter_message_delay_min_ms: 10000
+  inter_message_delay_max_ms: 20000
+  # Safety net: independently sweeps Wix for today's/tomorrow's confirmed
+  # bookings and backfills a reminder row for anyone never queued (e.g. booked
+  # while new_client_messages_enabled was off, or a webhook silently failed to
+  # queue one) — dedup'd via RemindersStore.get() so an already-queued/sent/
+  # replied booking is never touched twice. Keeps running even with client
+  # messaging re-enabled, as an ongoing guard against gaps recurring.
+  backfill:
+    enabled: true
+    poll_interval_seconds: 900   # every 15 min — cheap on our side, keeps Wix API usage low
 notifications:
   enabled: true
   email_to: "jason.omedes@gmail.com"    # must match the Resend account owner (sandbox sender limitation)
   reactive_after_minutes: 30            # alert once the link has been down this long
   proactive_warn_after_days: 12         # warn to re-link before the ~14d expiry window
+  # Chromium-wedge detection. state() reports "connected" while the renderer is
+  # stuck and every send times out — this is what silently killed the 2026-08-03
+  # nightly broadcast. Probed on the 15-min health tick; 2 strikes = ~30 min.
+  browser_probe_timeout_ms: 30000
+  browser_probe_failures_before_alert: 2
   # Requires RESEND_API_KEY env var on the host. Defaults to Resend's sandbox
   # sender; set email_from to a verified-domain address for production.
 guide_notify:

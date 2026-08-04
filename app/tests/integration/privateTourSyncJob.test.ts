@@ -23,14 +23,24 @@ function tmpDbPath(): string {
 
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} } as any;
 
+// The sync job prunes cached rows whose start_at_iso falls inside
+// `now - windowDaysBack … now + windowDaysForward`. A hardcoded fixture date is
+// a time bomb: once real time moves past it the event sits outside the window,
+// deleteStaleInRange never selects it, and the prune test silently stops
+// exercising anything. Anchor the fixture to "tomorrow" instead — inside every
+// window the tests use, whenever they run.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const EVENT_START_ISO = new Date(Date.now() + DAY_MS).toISOString();
+const EVENT_END_ISO = new Date(Date.now() + DAY_MS + 3 * 60 * 60 * 1000).toISOString();
+
 function makeGoogleEvent(overrides: Partial<any> = {}) {
   return {
     id: 'evt-1',
     summary: 'סיור גאודי פרטי. דנה. 5 אנשים. מדריך אדיר',
     description: 'דנה +972544211402',
     location: null,
-    start: { dateTime: '2026-07-14T08:00:00.000Z' },
-    end: { dateTime: '2026-07-14T11:00:00.000Z' },
+    start: { dateTime: EVENT_START_ISO },
+    end: { dateTime: EVENT_END_ISO },
     ...overrides,
   };
 }

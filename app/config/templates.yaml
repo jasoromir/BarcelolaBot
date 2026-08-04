@@ -144,6 +144,20 @@ cancel_notice: |
 
   *סטטוס Wix:* {wix_status}
 
+# Sent to the manager (reminders.client_response_notify_phone) every time a
+# customer confirms or cancels — whether by text, emoji, or a 👍 reaction.
+client_response_notice: |
+  {status_emoji} *לקוח {status_text}*
+
+  👤 *לקוח:* {client_name}
+  📞 {phone}
+  🎯 *סיור:* {tour_name_he}
+  🕒 {date} בשעה {time}
+  👥 {participant_count} משתתפים
+
+  *אופן התגובה:* {via_text}
+  _{raw_text}_
+
 private_tour_guide_reminder: |
   היי {guide_name} 👋
   תזכורת לסיור *פרטי* של מחר 🗓️

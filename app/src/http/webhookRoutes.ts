@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import type { App } from '../app.js';
 import { handleBookingWebhook } from '../webhook/bookingHandler.js';
+import { resolveGuidePhone } from '../messaging/guideDirectory.js';
 
 export function registerWebhookRoutes(exp: Express, app: App): void {
   exp.post('/webhook/wix', async (req, res) => {
@@ -21,10 +22,12 @@ export function registerWebhookRoutes(exp: Express, app: App): void {
         config: app.config,
         dedup: app.webhookDedup,
         sender: app.dmSender,
+        wa: app.whatsapp,
         logger: app.logger,
         isPaused: () => app.controlState.isPaused(),
         reminders: app.reminders,
         notifyDelivery: app.notifyDelivery,
+        forwardToGuidePhone: () => resolveGuidePhone(app.config.guides, 'ליאנה'),
       });
       // Always 200 so Wix retries stop; we've either sent, skipped, or deferred-to-queue.
       res.status(200).json({ received: true, outcome: outcome.outcome });

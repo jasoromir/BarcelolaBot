@@ -10,6 +10,9 @@ export interface ScheduledTasks {
   prune: cron.ScheduledTask;
   waHealth: cron.ScheduledTask;
   privateTourSync: cron.ScheduledTask | null;
+  /** Exposed for tests and the admin debug route — runs one health-check +
+   *  sessionMonitor tick on demand, without waiting for the 15-min cron. */
+  runHealthCheckTick: () => void;
 }
 
 export function startScheduler(app: App): ScheduledTasks {
@@ -47,8 +50,25 @@ export function startScheduler(app: App): ScheduledTasks {
     return forwarded;
   }
 
+  /**
+   * Email the operator when a broadcast job didn't actually deliver. Best-effort:
+   * a failure to alert must never mask the job's own outcome.
+   */
+  const reportOutcome = async (outcome: Awaited<ReturnType<typeof runNightlyJob>>) => {
+    if (!app.jobAlerter) return;
+    try {
+      await app.jobAlerter.report(outcome);
+    } catch (err) {
+      app.logger.error({
+        source: 'scheduler',
+        eventType: 'job_alert_failed',
+        message: (err as Error).message,
+      });
+    }
+  };
+
   const nightlyFn = async () => {
-    await runNightlyJob({
+    const outcome = await runNightlyJob({
       config: app.config,
       whatsapp: app.whatsapp,
       wix: app.wix,
@@ -60,6 +80,7 @@ export function startScheduler(app: App): ScheduledTasks {
       isPaused: () => app.controlState.isPaused(),
       dryRun: false,
     });
+    await reportOutcome(outcome);
   };
 
   const nightly = cron.schedule(
@@ -77,7 +98,7 @@ export function startScheduler(app: App): ScheduledTasks {
   const morning = cron.schedule(
     app.config.settings.schedule.morning_cron,
     async () => {
-      await runMorningJob({
+      const outcome = await runMorningJob({
         config: app.config,
         whatsapp: app.whatsapp,
         wix: app.wix,
@@ -86,6 +107,7 @@ export function startScheduler(app: App): ScheduledTasks {
         isPaused: () => app.controlState.isPaused(),
         dryRun: false,
       });
+      await reportOutcome(outcome);
     },
     { timezone: tz },
   );
@@ -109,45 +131,64 @@ export function startScheduler(app: App): ScheduledTasks {
   // hook. The level escalates to 'error' when WA has been disconnected
   // long enough that auto-reconnect has likely exhausted its fast backoff.
   let disconnectedSinceMs: number | null = null;
-  const waHealth = cron.schedule(
-    '*/15 * * * *',
-    () => {
-      const state = app.whatsapp.state();
-      if (state.kind === 'connected') {
-        disconnectedSinceMs = null;
-        app.logger.info({
+  const runHealthCheckTick = (): void => {
+    const state = app.whatsapp.state();
+
+    // Drive out-of-band email alerts (reactive disconnect + proactive
+    // re-link) on EVERY tick, connected or not — sessionMonitor.tick() owns
+    // its own thresholds/dedup and, critically, is what clears the
+    // "alert already sent" flag on reconnect. This must NOT be gated behind
+    // the connected-only early return below: if it were only called while
+    // disconnected, the clear-on-reconnect logic inside tick() would never
+    // run, so once ANY outage sent an alert, the flag would stay stuck at
+    // '1' forever — silently swallowing every future outage's alert (found
+    // 2026-07-19, after a 2026-07-18 outage went unnoticed for 24h with an
+    // unreachable QR code and zero alert email).
+    if (app.sessionMonitor) {
+      app.sessionMonitor.tick().catch((err) => {
+        app.logger.error({
           source: 'scheduler',
-          eventType: 'wa_health_check',
-          message: `wa=connected phone=${state.phone}`,
-          metadata: { status: 'connected', phone: state.phone },
+          eventType: 'session_monitor_tick_failed',
+          message: (err as Error).message,
         });
-        return;
-      }
-      if (disconnectedSinceMs === null) disconnectedSinceMs = Date.now();
-      const elapsedMinutes = Math.floor((Date.now() - disconnectedSinceMs) / 60_000);
-      const level = elapsedMinutes >= 15 ? 'error' : 'warn';
-      app.logger[level]({
+      });
+    }
+
+    // Liveness of the Chromium page itself. state() below can report
+    // "connected" while the renderer is wedged and every send times out —
+    // that's how the 2026-08-03 nightly broadcast was lost silently. This
+    // probe is the only check that would have caught it.
+    if (app.browserProbe) {
+      app.browserProbe.tick().catch((err) => {
+        app.logger.error({
+          source: 'scheduler',
+          eventType: 'browser_probe_tick_failed',
+          message: (err as Error).message,
+        });
+      });
+    }
+
+    if (state.kind === 'connected') {
+      disconnectedSinceMs = null;
+      app.logger.info({
         source: 'scheduler',
         eventType: 'wa_health_check',
-        message: `wa=${state.kind} disconnectedForMinutes=${elapsedMinutes}`,
-        metadata: { status: state.kind, disconnectedForMinutes: elapsedMinutes },
+        message: `wa=connected phone=${state.phone}`,
+        metadata: { status: 'connected', phone: state.phone },
       });
-
-      // Drive out-of-band email alerts (reactive disconnect + proactive re-link).
-      // Same 15-min cadence as the health check; the monitor owns its thresholds
-      // and dedup, so calling every tick is safe.
-      if (app.sessionMonitor) {
-        app.sessionMonitor.tick().catch((err) => {
-          app.logger.error({
-            source: 'scheduler',
-            eventType: 'session_monitor_tick_failed',
-            message: (err as Error).message,
-          });
-        });
-      }
-    },
-    { timezone: tz },
-  );
+      return;
+    }
+    if (disconnectedSinceMs === null) disconnectedSinceMs = Date.now();
+    const elapsedMinutes = Math.floor((Date.now() - disconnectedSinceMs) / 60_000);
+    const level = elapsedMinutes >= 15 ? 'error' : 'warn';
+    app.logger[level]({
+      source: 'scheduler',
+      eventType: 'wa_health_check',
+      message: `wa=${state.kind} disconnectedForMinutes=${elapsedMinutes}`,
+      metadata: { status: state.kind, disconnectedForMinutes: elapsedMinutes },
+    });
+  };
+  const waHealth = cron.schedule('*/15 * * * *', runHealthCheckTick, { timezone: tz });
 
   // Daily private-tour sync (fetch + LLM-parse new/changed bookings from the
   // Google Calendar). Independent of the day-before notify poller, which is
@@ -180,5 +221,5 @@ export function startScheduler(app: App): ScheduledTasks {
     },
   });
 
-  return { nightly, nightlyFriday, morning, prune, waHealth, privateTourSync };
+  return { nightly, nightlyFriday, morning, prune, waHealth, privateTourSync, runHealthCheckTick };
 }

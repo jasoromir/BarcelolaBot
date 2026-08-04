@@ -136,6 +136,7 @@ describe('DirectMessageSender.drainPending', () => {
       pendingDms: q,
       allowlist: () => openCfg,
       retry: { attempts: 3, backoffMs: [100, 100] },
+      drainInterItemDelayMs: 0,
     });
     const stats = await sender.drainPending();
     expect(stats).toEqual({ sent: 2, failed: 0, abandoned: 0 });
@@ -160,6 +161,7 @@ describe('DirectMessageSender.drainPending', () => {
       // sends, drainPending must not apply backoff — it does a single
       // attempt per item so one broken number can't stall the whole sweep.
       retry: { attempts: 3, backoffMs: [60_000, 300_000, 900_000] },
+      drainInterItemDelayMs: 0,
     });
     const start = Date.now();
     const stats = await sender.drainPending();
@@ -188,10 +190,29 @@ describe('DirectMessageSender.drainPending', () => {
       allowlist: () => openCfg,
       retry: { attempts: 1, backoffMs: [] },
       maxDrainAttempts: 2,
+      drainInterItemDelayMs: 0,
     });
     await sender.drainPending();
     expect(q.pending()).toHaveLength(1); // 1st failure: still pending
     await sender.drainPending();
     expect(q.pending()).toHaveLength(0); // 2nd failure hits the limit: abandoned
+  });
+
+  it('waits drainInterItemDelayMs between sends so a burst reconnect drain does not fire back-to-back (2026-07-20 instant-ban incident)', async () => {
+    const client = fakeClient();
+    const q = freshQueue();
+    q.enqueue({ phone: '+1', body: 'a' });
+    q.enqueue({ phone: '+2', body: 'b' });
+    const sender = new DirectMessageSender({
+      client,
+      pendingDms: q,
+      allowlist: () => openCfg,
+      retry: { attempts: 1, backoffMs: [] },
+      drainInterItemDelayMs: 50,
+    });
+    const start = Date.now();
+    const stats = await sender.drainPending();
+    expect(Date.now() - start).toBeGreaterThanOrEqual(50);
+    expect(stats).toEqual({ sent: 2, failed: 0, abandoned: 0 });
   });
 });

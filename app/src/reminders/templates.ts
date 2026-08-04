@@ -142,6 +142,43 @@ export function buildWorkerForward(input: WorkerForwardInput): string {
   });
 }
 
+export interface ClientResponseNoticeInput {
+  reminder: ReminderRow;
+  templates: TemplatesConfig;
+  tours: ToursConfig;
+  /** Which way the customer answered. */
+  outcome: 'confirm' | 'cancel';
+  /**
+   * How the answer arrived — a text/emoji reply, or a reaction on the reminder.
+   * Rendered so staff can tell a 👍 reaction apart from someone typing "מאשר".
+   */
+  via: 'text' | 'reaction';
+  /** The customer's raw message, or the reaction emoji when via === 'reaction'. */
+  rawText: string;
+}
+
+/**
+ * Heads-up DM to the manager every time a customer confirms or cancels, so the
+ * decision is visible without opening the admin panel or the worker group.
+ */
+export function buildClientResponseNotice(input: ClientResponseNoticeInput): string {
+  const confirmed = input.outcome === 'confirm';
+  return interpolate(input.templates.client_response_notice, {
+    status_emoji: confirmed ? '✅' : '❌',
+    status_text: confirmed ? 'אישר/ה הגעה' : 'ביטל/ה הגעה',
+    client_name: input.reminder.clientName ?? 'Guest',
+    phone: input.reminder.phone,
+    tour_name_he: resolveTourName(input.reminder, input.tours),
+    date: fmtDateDDMMYY(input.reminder.startAtIso),
+    time: fmtTime(input.reminder.startAtIso),
+    participant_count: String(input.reminder.participantCount),
+    // The emoji itself is rendered by {raw_text}, so via_text stays a plain label
+    // and doesn't repeat it.
+    via_text: input.via === 'reaction' ? 'תגובה (ריאקשן)' : 'הודעת טקסט',
+    raw_text: input.rawText,
+  });
+}
+
 export interface CancelNoticeInput {
   reminder: ReminderRow;
   templates: TemplatesConfig;

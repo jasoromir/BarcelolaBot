@@ -71,6 +71,15 @@ export const TemplatesConfigSchema = z.object({
   no_reply_alert: z.string().min(1),
   worker_forward: z.string().min(1),
   cancel_notice: z.string().min(1),
+  // Manager heads-up sent on every customer confirm/cancel. Optional with a
+  // default so a stale overlay templates.yaml on the volume (which takes
+  // precedence over the bundled file) doesn't crash boot when this is added.
+  client_response_notice: z
+    .string()
+    .min(1)
+    .default(
+      '{status_emoji} *לקוח {status_text}*\n\n👤 *לקוח:* {client_name}\n📞 {phone}\n🎯 *סיור:* {tour_name_he}\n🕒 {date} בשעה {time}\n👥 {participant_count} משתתפים\n\n*אופן התגובה:* {via_text}\n_{raw_text}_\n',
+    ),
   // Private (custom, non-catalog) tour day-before reminder, sent to the
   // assigned guide and the manager. Optional with a default so an older
   // overlay templates.yaml on the volume doesn't crash boot when this is added.
@@ -117,6 +126,11 @@ export const SettingsConfigSchema = z.object({
   }),
   reminders: z.object({
     enabled: z.boolean(),
+    // Kill-switch for the welcome/confirmation DM and its 24h reminder to new
+    // clients, independent of `enabled`. Flip to false to stop messaging
+    // customers (e.g. while the WhatsApp account is flagged/recovering)
+    // without touching guide rosters, group broadcasts, or moderation.
+    new_client_messages_enabled: z.boolean().default(true),
     lead_time_hours: z.number().positive(),
     // Fixed clock time (HH:MM, 24h, local timezone) at which to send the
     // reminder on the day before the tour. Takes precedence over lead_time_hours.
@@ -129,6 +143,34 @@ export const SettingsConfigSchema = z.object({
     classifier_confidence_threshold: z.number().min(0).max(1),
     default_google_maps_url: z.string().url().optional(),
     reply_debounce_seconds: z.number().int().nonnegative(),
+    // Manager who gets a DM every time a customer confirms or cancels a tour.
+    // Optional — omit to disable the notification entirely (nothing else in the
+    // confirm/cancel flow depends on it). Optional also keeps a stale overlay
+    // settings.yaml on the volume from crashing boot.
+    client_response_notify_phone: PhoneSchema.optional(),
+    // Extra randomized pause between consecutive due reminders in the same
+    // poll tick, on top of the per-message humanized typing delay — spreads
+    // out a batch of several reminders so it doesn't read as bulk/automated
+    // sending to WhatsApp's anti-spam detection. Defaults to a 10-20s gap.
+    inter_message_delay_min_ms: z.number().int().nonnegative().default(10_000),
+    inter_message_delay_max_ms: z.number().int().nonnegative().default(20_000),
+    // Safety net: independently sweeps Wix for today's/tomorrow's confirmed
+    // bookings and backfills a reminder row for any booking that was never
+    // queued (e.g. booked while new_client_messages_enabled was off) —
+    // dedup'd against RemindersStore so an already-queued/sent/replied
+    // booking is never touched twice. Off by default; existing deployments
+    // won't get the extra Wix API traffic unless explicitly enabled.
+    backfill: z
+      .object({
+        enabled: z.boolean(),
+        poll_interval_seconds: z.number().int().positive().default(900),
+        // How many days ahead the wide, on-demand sweep looks (see
+        // reminderBackfillRunner.runWideSweep) — run once at every
+        // startup/deploy, not on a timer, to catch bookings made further out
+        // than the tight today+tomorrow poll without recurring Wix API load.
+        wide_sweep_days_ahead: z.number().int().positive().default(60),
+      })
+      .optional(),
   }),
   notifications: z
     .object({
@@ -137,6 +179,10 @@ export const SettingsConfigSchema = z.object({
       email_from: z.string().min(1).optional(),
       reactive_after_minutes: z.number().int().positive(),
       proactive_warn_after_days: z.number().positive(),
+      // Chromium-wedge probe. Optional with defaults so a stale config overlay
+      // can't crash boot (see the volume-overlay precedence note in CLAUDE.md).
+      browser_probe_timeout_ms: z.number().int().positive().optional(),
+      browser_probe_failures_before_alert: z.number().int().positive().optional(),
     })
     .optional(),
   // Pre-tour roster sent to the assigned guide a few minutes before the tour
